@@ -3,16 +3,24 @@ set -euo pipefail
 
 PLUGIN_ID="cursorSpotlight"
 PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TARGET_DIR="${HOME}/.config/DankMaterialShell/plugins/cursor-spotlight"
+DMS_DIR="${HOME}/.config/dms/plugins/${PLUGIN_ID}"
+DMS_DIR_KEBAB="${HOME}/.config/dms/plugins/cursor-spotlight"
+LEGACY_DIR="${HOME}/.config/DankMaterialShell/plugins/cursor-spotlight"
 
 echo "==> Instalando plugin ${PLUGIN_ID} para DMS + Niri..."
 
-# 1. Asegurar directorio destino si se clonó fuera de ~/.config/DankMaterialShell/plugins
+# 1. Asegurar directorios destino en ~/.config/dms/plugins/ y ~/.config/DankMaterialShell/plugins/
+mkdir -p "${HOME}/.config/dms/plugins"
 mkdir -p "${HOME}/.config/DankMaterialShell/plugins"
-if [ "${PLUGIN_DIR}" != "$(realpath "${TARGET_DIR}" 2>/dev/null || echo "${TARGET_DIR}")" ]; then
-    ln -sfn "${PLUGIN_DIR}" "${TARGET_DIR}"
-    echo "    Enlazado en: ${TARGET_DIR}"
+
+# Enlazar en ~/.config/dms/plugins/ (ruta oficial del sistema DMS)
+if [ "${PLUGIN_DIR}" != "$(realpath "${DMS_DIR_KEBAB}" 2>/dev/null || echo "")" ]; then
+    ln -sfn "${PLUGIN_DIR}" "${DMS_DIR_KEBAB}"
 fi
+# Enlazar con alias camelCase y legacy
+ln -sfn "${PLUGIN_DIR}" "${DMS_DIR}" 2>/dev/null || true
+ln -sfn "${PLUGIN_DIR}" "${LEGACY_DIR}" 2>/dev/null || true
+echo "    Instalado y enlazado en: ${DMS_DIR_KEBAB}"
 
 # 2. Compilar wl-nudge si gcc y cabeceras están disponibles
 if command -v gcc >/dev/null 2>&1; then
@@ -51,6 +59,23 @@ if command -v pkexec >/dev/null 2>&1; then
 fi
 
 # 4. Registrar y activar en DMS
+python3 -c '
+import json, os
+for base in [os.path.expanduser("~/.config/dms"), os.path.expanduser("~/.config/DankMaterialShell")]:
+    os.makedirs(base, exist_ok=True)
+    p = os.path.join(base, "plugin_settings.json")
+    d = {}
+    if os.path.exists(p):
+        try:
+            with open(p, "r") as f: d = json.load(f)
+        except Exception: pass
+    if "cursorSpotlight" not in d: d["cursorSpotlight"] = {}
+    d["cursorSpotlight"]["enabled"] = True
+    try:
+        with open(p, "w") as f: json.dump(d, f, indent=2)
+    except Exception: pass
+' 2>/dev/null || true
+
 if command -v dms >/dev/null 2>&1; then
     echo "==> Escaneando y habilitando el plugin en DMS..."
     dms ipc call plugin-scan scan >/dev/null 2>&1 || true
