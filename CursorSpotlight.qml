@@ -188,7 +188,6 @@ PluginComponent {
         drawActive = !drawActive;
         if (drawActive) {
             nudgeTimer.restart();
-            ToastService.showInfo("Modo Pincel activo (Esc: salir, C: limpiar, Z: deshacer, L: láser)");
         }
     }
 
