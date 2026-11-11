@@ -1,19 +1,100 @@
 import QtQuick
 import Quickshell
+import Quickshell.Io
 import qs.Common
 import qs.Services
 import qs.Widgets
+import qs.DCommon.Widgets
 import qs.Modules.Plugins
 
 PluginSettings {
     id: root
     pluginId: "cursorSpotlight"
 
+    readonly property string pluginDir: Qt.resolvedUrl(".").toString().replace(/^file:\/\//, "").replace(/\/$/, "")
+
     readonly property var daemonInstance: pluginService && pluginService.pluginDaemonInstances ? pluginService.pluginDaemonInstances[pluginId] : null
     readonly property bool spotlightOn: daemonInstance ? daemonInstance.spotlightActive : false
     readonly property bool clicksOn: daemonInstance ? daemonInstance.clicksActive : Boolean(pluginData.clicksActive)
     readonly property bool drawOn: daemonInstance ? daemonInstance.drawActive : false
     readonly property string permStatus: daemonInstance ? daemonInstance.helperPermStatus : "UNKNOWN"
+
+    // Update state management
+    property string updateStatus: "idle" // "idle", "checking", "up_to_date", "available", "updating", "done", "error"
+    property string updateMsg: ""
+    property string commitHash: ""
+    property int newCommitsCount: 0
+
+    Process {
+        id: checkProc
+        command: [root.pluginDir + "/update_helper.sh", "check"]
+        running: false
+        stdout: StdioCollector {
+            onStreamFinished: {
+                const out = (text || "").trim();
+                const parts = out.split("|");
+                if (parts[0] === "UPDATE_AVAILABLE") {
+                    root.updateStatus = "available";
+                    root.newCommitsCount = parseInt(parts[1]) || 1;
+                    root.updateMsg = "Hay " + (parts[1] || "1") + " mejora disponible en GitHub: " + (parts[2] || "");
+                } else if (parts[0] === "UP_TO_DATE") {
+                    root.updateStatus = "up_to_date";
+                    root.commitHash = parts[1] || "";
+                    root.updateMsg = "El plugin está actualizado a la última versión (" + (parts[1] || "") + ").";
+                } else if (parts[0] === "ERROR") {
+                    root.updateStatus = "error";
+                    root.updateMsg = parts[1] || "No se pudo conectar con GitHub.";
+                }
+            }
+        }
+        onExited: exitCode => {
+            if (exitCode !== 0 && root.updateStatus === "checking") {
+                root.updateStatus = "error";
+                root.updateMsg = "Error al conectar con GitHub";
+            }
+        }
+    }
+
+    Process {
+        id: applyProc
+        command: [root.pluginDir + "/update_helper.sh", "update"]
+        running: false
+        stdout: StdioCollector {
+            onStreamFinished: {
+                const out = (text || "").trim();
+                if (out.indexOf("SUCCESS") !== -1) {
+                    root.updateStatus = "done";
+                    root.updateMsg = "¡Plugin actualizado con éxito! Reiniciando DMS...";
+                } else if (out.indexOf("ERROR") !== -1) {
+                    root.updateStatus = "error";
+                    root.updateMsg = out;
+                }
+            }
+        }
+    }
+
+    function checkForUpdates() {
+        if (root.updateStatus === "checking" || root.updateStatus === "updating")
+            return;
+        root.updateStatus = "checking";
+        root.updateMsg = "Buscando actualizaciones en GitHub...";
+        checkProc.running = true;
+    }
+
+    function applyUpdate() {
+        if (root.updateStatus === "updating")
+            return;
+        root.updateStatus = "updating";
+        root.updateMsg = "Descargando e instalando actualización...";
+        applyProc.running = true;
+    }
+
+    Timer {
+        id: autoCheckTimer
+        interval: 1000
+        repeat: false
+        onTriggered: root.checkForUpdates()
+    }
 
     // DMS's built-in reloadChildValues() only visits top-level children of PluginSettings.
     // Recursively initialize all ToggleSetting / SliderSetting nested inside StyledRect cards.
@@ -44,6 +125,7 @@ PluginSettings {
 
     Component.onCompleted: {
         Qt.callLater(() => root.reloadNested(root));
+        autoCheckTimer.start();
     }
 
     function settingVal(key, fallback) {
@@ -234,6 +316,81 @@ PluginSettings {
         font.pixelSize: Theme.fontSizeSmall
         color: Theme.surfaceVariantText
         wrapMode: Text.WordWrap
+    }
+
+    // 0. ACTUALIZACIONES DEL PLUGIN (DESDE LA INTERFAZ)
+    SettingsCard {
+        height: updateCol.implicitHeight + Theme.spacingL * 2
+        border.color: root.updateStatus === "available" ? "#4dabf7" : Theme.outline
+        border.width: root.updateStatus === "available" ? 1.5 : 1
+
+        Column {
+            id: updateCol
+            anchors.fill: parent
+            anchors.margins: Theme.spacingL
+            spacing: Theme.spacingM
+
+            Row {
+                width: parent.width
+                spacing: Theme.spacingM
+
+                Column {
+                    width: parent.width - updateActionsRow.width - Theme.spacingM
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: 4
+
+                    Row {
+                        spacing: 8
+                        DIcon {
+                            name: root.updateStatus === "available" ? "system_update" : (root.updateStatus === "checking" || root.updateStatus === "updating" ? "sync" : (root.updateStatus === "error" ? "error" : "check_circle"))
+                            size: 20
+                            color: root.updateStatus === "available" ? "#4dabf7" : (root.updateStatus === "error" ? Theme.error : "#2ed573")
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+
+                        StyledText {
+                            text: "Versión Instalada: v1.2.0"
+                            font.pixelSize: Theme.fontSizeMedium
+                            font.weight: Font.Bold
+                            color: Theme.surfaceText
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+                    }
+
+                    StyledText {
+                        width: parent.width
+                        text: root.updateMsg !== "" ? root.updateMsg : "Comprueba y descarga actualizaciones directamente desde GitHub sin usar la terminal."
+                        font.pixelSize: Theme.fontSizeSmall
+                        color: root.updateStatus === "available" ? "#4dabf7" : Theme.surfaceVariantText
+                        wrapMode: Text.WordWrap
+                    }
+                }
+
+                Row {
+                    id: updateActionsRow
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: Theme.spacingS
+
+                    DButton {
+                        text: "Comprobar"
+                        iconName: "refresh"
+                        variant: "outlined"
+                        busy: root.updateStatus === "checking"
+                        enabled: root.updateStatus !== "checking" && root.updateStatus !== "updating"
+                        onClicked: root.checkForUpdates()
+                    }
+
+                    DButton {
+                        text: "Actualizar"
+                        iconName: "download"
+                        variant: root.updateStatus === "available" ? "filled" : "tonal"
+                        busy: root.updateStatus === "updating"
+                        enabled: root.updateStatus === "available" && root.updateStatus !== "updating"
+                        onClicked: root.applyUpdate()
+                    }
+                }
+            }
+        }
     }
 
     // 1. ESTADO Y CONTROLES EN VIVO

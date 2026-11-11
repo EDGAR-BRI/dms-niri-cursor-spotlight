@@ -27,13 +27,14 @@ Plugin nativo para **Dux Modular Shell (DMS / DankMaterialShell)** en Wayland (*
 
 ---
 
-## Personalización Gráfica (Sin tocar código)
+## Personalización y Actualizaciones Gráficas (Sin tocar la terminal)
 
-Abre **Ajustes de DMS → Plugins → Cursor Spotlight, Clicks & Draw** para personalizar en tiempo real:
-- **Control en vivo y permisos**: Activa cualquiera de los 3 modos o concede permisos de lectura del ratón con un click mediante Polkit.
-- **Clicks y Halo**: Tamaño del halo, porcentaje de crecimiento/rebote al hacer click (`100%`–`260%`), activar/desactivar ondas (*Shockwave*) o rayos (*Click Burst*), velocidad y **selectores de color gráficos** para Click Izquierdo, Derecho y Central.
-- **Spotlight (Blur)**: Radio del círculo nítido, porcentaje de oscurecimiento del fondo, grosor/color del anillo y temporizador de auto-apagado.
-- **Modo Pincel**: Modo Láser por defecto, grosor inicial y color inicial.
+Abre **Ajustes de DMS → Plugins → Cursor Spotlight, Clicks & Draw**:
+- 🔄 **Actualizaciones con 1 click**: Comprobación automática y botón de actualización directa desde GitHub, recompilando y reiniciando DMS sin necesidad de usar la terminal.
+- ⚡ **Control en vivo y permisos**: Activa cualquiera de los 3 modos o concede permisos de lectura del ratón con un click mediante Polkit.
+- 🎯 **Clicks y Halo**: Tamaño del halo, porcentaje de crecimiento/rebote al hacer click (`100%`–`260%`), activar/desactivar ondas (*Shockwave*) o rayos (*Click Burst*), velocidad y **selectores de color gráficos** para Click Izquierdo, Derecho y Central.
+- 🔍 **Spotlight (Blur)**: Radio del círculo nítido, porcentaje de oscurecimiento del fondo, grosor/color del anillo y temporizador de auto-apagado.
+- 🎨 **Modo Pincel**: Modo Láser por defecto, grosor inicial y color inicial.
 
 ---
 
