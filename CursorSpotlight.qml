@@ -70,6 +70,7 @@ PluginComponent {
     property real drawSize: Number(pluginData.drawSize) || 5
     property bool drawLaserMode: boolVal(pluginData.drawLaserMode, false)
     property string drawTool: pluginData.drawTool || "free"
+    property bool drawKeepOnExit: boolVal(pluginData.drawKeepOnExit, true)
 
     readonly property var drawTools: [
         { "id": "free",   "icon": "brush",                  "label": "Pincel",   "key": "P" },
@@ -96,6 +97,14 @@ PluginComponent {
             drawLaserMode = boolVal(pluginData.drawLaserMode, false);
         if (pluginData.drawTool)
             drawTool = String(pluginData.drawTool);
+        if (pluginData.drawKeepOnExit !== undefined)
+            drawKeepOnExit = boolVal(pluginData.drawKeepOnExit, true);
+    }
+
+    onDrawActiveChanged: {
+        if (!drawActive && !drawKeepOnExit) {
+            clearAllDrawings();
+        }
     }
 
     // Signals for cross-screen synchronization
@@ -130,6 +139,11 @@ PluginComponent {
     function toggleLaserMode() {
         drawLaserMode = !drawLaserMode;
         savePluginSetting("drawLaserMode", drawLaserMode);
+    }
+
+    function toggleKeepOnExit() {
+        drawKeepOnExit = !drawKeepOnExit;
+        savePluginSetting("drawKeepOnExit", drawKeepOnExit);
     }
 
     function nudgeCursor() {
@@ -370,7 +384,7 @@ PluginComponent {
             property var currentStroke: null
 
             screen: modelData
-            visible: root.anyActive
+            visible: root.anyActive || (root.drawKeepOnExit && win.strokes.length > 0)
             color: "transparent"
 
             WlrLayershell.namespace: "dms:cursor-spotlight"
@@ -922,6 +936,9 @@ PluginComponent {
                     } else if (event.key === Qt.Key_B) {
                         root.toggleSpotlight();
                         event.accepted = true;
+                    } else if (event.key === Qt.Key_K) {
+                        root.toggleKeepOnExit();
+                        event.accepted = true;
                     } else if (event.key === Qt.Key_P || event.key === Qt.Key_F) {
                         root.setDrawTool("free");
                         event.accepted = true;
@@ -1273,6 +1290,31 @@ PluginComponent {
                                 anchors.fill: parent
                                 cursorShape: Qt.PointingHandCursor
                                 onClicked: root.toggleSpotlight()
+                            }
+                        }
+
+                        Rectangle {
+                            height: 28
+                            width: keepLabel.implicitWidth + 18
+                            radius: 14
+                            anchors.verticalCenter: parent.verticalCenter
+                            color: root.drawKeepOnExit ? Qt.rgba(0.18, 0.84, 0.45, 0.25) : Qt.rgba(1, 1, 1, 0.08)
+                            border.color: root.drawKeepOnExit ? "#2ed573" : "transparent"
+                            border.width: 1
+
+                            Text {
+                                id: keepLabel
+                                anchors.centerIn: parent
+                                text: root.drawKeepOnExit ? "Mantener trazos (K): Sí" : "Mantener trazos (K): No"
+                                color: root.drawKeepOnExit ? "#2ed573" : "#ffffff"
+                                font.pixelSize: 11
+                                font.bold: root.drawKeepOnExit
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: root.toggleKeepOnExit()
                             }
                         }
 

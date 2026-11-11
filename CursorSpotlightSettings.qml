@@ -348,7 +348,7 @@ PluginSettings {
                         }
 
                         StyledText {
-                            text: "Versión Instalada: v1.2.0"
+                            text: "Versión Instalada: v1.3.0"
                             font.pixelSize: Theme.fontSizeMedium
                             font.weight: Font.Bold
                             color: Theme.surfaceText
@@ -805,6 +805,13 @@ PluginSettings {
                 label: "Modo Pincel Láser por defecto"
                 description: "Los trazos brillan y se desvanecen solos tras 2 segundos (también cambiable con la tecla L)"
                 defaultValue: false
+            }
+
+            ToggleSetting {
+                settingKey: "drawKeepOnExit"
+                label: "Mantener dibujos en pantalla al salir (Modo Pizarra)"
+                description: "Si está activo, lo que dibujes se queda visible en pantalla al pulsar Esc o salir (en modo transparente click-through para seguir usando tus ventanas). Si está desactivado, se borran automáticamente al salir."
+                defaultValue: true
             }
 
             SliderSetting {

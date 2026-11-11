@@ -2,7 +2,7 @@
     "id": "cursorSpotlight",
     "name": "Cursor Spotlight, Clicks & Draw",
     "description": "Screen blur spotlight to locate the cursor, animated click ripples, and on-screen drawing brush for Niri + DMS",
-    "version": "1.2.0",
+    "version": "1.3.0",
     "license": "MIT",
     "author": "EDGAR-BRI",
     "icon": "my_location",
