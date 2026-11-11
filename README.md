@@ -9,18 +9,21 @@ Plugin nativo para **Dux Modular Shell (DMS / DankMaterialShell)** en Wayland (*
    - **Crecimiento elástico del Halo (`Easing.OutBack`)**: El anillo alrededor del cursor crece y rebota en cada click.
    - **Doble onda expansiva (*Shockwave*) + Rayos radiales (*Click Burst*)** a 60 FPS con colores personalizables por botón (Izquierdo, Derecho y Central).
 3. **Modo Pincel / Dibujar en Pantalla (`Mod+Alt+D`)**:
-   - Dibuja directamente sobre la pantalla con una barra flotante superior:
-     - **Colores rápidos**: Teclas `1` a `6` (Rojo, Amarillo, Verde, Azul, Rosa, Blanco).
-     - **Modo Pincel Fijo vs. Pincel Láser (`L`)**: En modo láser, los trazos brillan y se desvanecen automáticamente tras ~2 segundos.
-     - **Formas rápidas**:
-       - Arrastrar normal: Trazo libre suavizado.
-       - `Shift` + arrastrar: **Flecha / línea recta**.
-       - `Ctrl` + arrastrar: **Rectángulo**.
-     - **Rueda del ratón (Scroll)**: Cambia el grosor del pincel.
-     - **Click derecho o `Z`**: Deshacer último trazo.
-     - **Click central o `C`**: Limpiar toda la pantalla.
-     - **Tecla `B`**: Activar/desactivar el Spotlight Blur mientras dibujas.
-     - **Tecla `Esc`**: Salir del modo pincel.
+   - Dibuja directamente sobre la pantalla con una barra de herramientas flotante estilo Paint (Material 3):
+     - **Herramientas de dibujo**:
+       - 🖌️ **Pincel libre (`P`)**: Trazo suave a mano alzada.
+       - ↗️ **Flecha (`A`)**: Flecha apuntadora con punta rellena y eje dinámico.
+       - ⭕ **Círculo / Óvalo (`O`)**: Círculo u óvalo (mantén `Shift` para proporción perfecta 1:1).
+       - 🔲 **Cuadrado / Rectángulo (`R`)**: Rectángulo (mantén `Shift` para cuadrado perfecto 1:1).
+     - **Control de Grosor interactivo**:
+       - Botones `[-]` y `[+]`, control deslizante con previsualización en vivo del punto y tamaño en píxeles.
+       - También ajustable con la **rueda del ratón (Scroll)** o teclas `[` y `]`.
+     - **Colores rápidos**: Paleta visual interactiva o teclas numéricas `1` a `6` (Rojo, Amarillo, Verde, Azul, Rosa, Blanco).
+     - **Modo Pincel Fijo vs. Pincel Láser (`L`)**: En modo láser, los trazos brillan con resplandor neón y se desvanecen automáticamente tras ~2 segundos.
+     - **Spotlight Blur de fondo (`B`)**: Activa o desactiva el desenfoque de fondo mientras dibujas.
+     - **Deshacer (`Z` o Click Derecho)**: Deshace el último trazo o figura dibujada.
+     - **Limpiar pantalla (`C` o Click Central)**: Borra todos los dibujos de la pantalla.
+     - **Salir (`Esc`)**: Cierra el modo de dibujo.
 
 ---
 

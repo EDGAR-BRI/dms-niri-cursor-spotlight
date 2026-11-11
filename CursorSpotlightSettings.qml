@@ -603,6 +603,14 @@ PluginSettings {
                 defaultColor: "#ff4757"
                 allowThemeReset: true
             }
+
+            StyledText {
+                width: parent.width
+                text: "Herramientas en pantalla (barra superior o teclas): Pincel (P), Flecha (A), Círculo (O), Cuadrado (R). Mantén Shift para figuras perfectas 1:1. Rueda del ratón o teclas [ / ] para cambiar grosor en vivo."
+                font.pixelSize: Theme.fontSizeSmall
+                color: Theme.surfaceVariantText
+                wrapMode: Text.Wrap
+            }
         }
     }
 

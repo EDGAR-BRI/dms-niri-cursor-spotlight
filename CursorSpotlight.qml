@@ -4,6 +4,7 @@ import Quickshell.Io
 import Quickshell.Wayland
 import qs.Common
 import qs.Services
+import qs.DCommon.Widgets
 import qs.Modules.Plugins
 
 PluginComponent {
@@ -68,6 +69,14 @@ PluginComponent {
     property string drawColor: pluginData.drawColor || "#ff4757"
     property real drawSize: Number(pluginData.drawSize) || 5
     property bool drawLaserMode: boolVal(pluginData.drawLaserMode, false)
+    property string drawTool: pluginData.drawTool || "free"
+
+    readonly property var drawTools: [
+        { "id": "free",   "icon": "brush",                  "label": "Pincel",   "key": "P" },
+        { "id": "arrow",  "icon": "north_east",             "label": "Flecha",   "key": "A" },
+        { "id": "circle", "icon": "radio_button_unchecked", "label": "Círculo",  "key": "O" },
+        { "id": "rect",   "icon": "crop_square",            "label": "Cuadrado", "key": "R" }
+    ]
 
     readonly property var paletteColors: [
         "#ff4757", // 1: Red
@@ -78,6 +87,17 @@ PluginComponent {
         "#ffffff"  // 6: White
     ]
 
+    onPluginDataChanged: {
+        if (pluginData.drawColor)
+            drawColor = String(pluginData.drawColor);
+        if (pluginData.drawSize !== undefined)
+            drawSize = Math.max(2, Math.min(32, Number(pluginData.drawSize) || 5));
+        if (pluginData.drawLaserMode !== undefined)
+            drawLaserMode = boolVal(pluginData.drawLaserMode, false);
+        if (pluginData.drawTool)
+            drawTool = String(pluginData.drawTool);
+    }
+
     // Signals for cross-screen synchronization
     signal clearAllDrawings()
     signal undoLastDrawing()
@@ -87,6 +107,29 @@ PluginComponent {
         if (pluginService && pluginService.savePluginData) {
             pluginService.savePluginData(pluginId, key, value);
         }
+    }
+
+    function setDrawSize(newSize) {
+        const clamped = Math.max(2, Math.min(32, Math.round(newSize)));
+        if (drawSize !== clamped) {
+            drawSize = clamped;
+            savePluginSetting("drawSize", clamped);
+        }
+    }
+
+    function setDrawTool(toolId) {
+        drawTool = toolId;
+        savePluginSetting("drawTool", toolId);
+    }
+
+    function setDrawColor(hexColor) {
+        drawColor = hexColor;
+        savePluginSetting("drawColor", hexColor);
+    }
+
+    function toggleLaserMode() {
+        drawLaserMode = !drawLaserMode;
+        savePluginSetting("drawLaserMode", drawLaserMode);
     }
 
     function nudgeCursor() {
@@ -632,30 +675,68 @@ PluginComponent {
                         }
 
                         const pts = s.points;
-                        if (s.shape === "rect" && pts.length >= 2) {
+                        if ((s.shape === "rect" || s.shape === "circle" || s.shape === "arrow" || s.shape === "line") && pts.length >= 2) {
                             const p0 = pts[0];
                             const p1 = pts[pts.length - 1];
-                            ctx.strokeRect(p0.x, p0.y, p1.x - p0.x, p1.y - p0.y);
-                        } else if (s.shape === "line" && pts.length >= 2) {
-                            const p0 = pts[0];
-                            const p1 = pts[pts.length - 1];
-                            ctx.beginPath();
-                            ctx.moveTo(p0.x, p0.y);
-                            ctx.lineTo(p1.x, p1.y);
-                            ctx.stroke();
+                            let dx = p1.x - p0.x;
+                            let dy = p1.y - p0.y;
 
-                            const angle = Math.atan2(p1.y - p0.y, p1.x - p0.x);
-                            const headLen = Math.max(14, s.size * 3.2);
-                            ctx.beginPath();
-                            ctx.moveTo(p1.x, p1.y);
-                            ctx.lineTo(p1.x - headLen * Math.cos(angle - Math.PI / 6), p1.y - headLen * Math.sin(angle - Math.PI / 6));
-                            ctx.lineTo(p1.x - headLen * Math.cos(angle + Math.PI / 6), p1.y - headLen * Math.sin(angle + Math.PI / 6));
-                            ctx.closePath();
-                            ctx.fill();
+                            if (s.proportional && (s.shape === "rect" || s.shape === "circle")) {
+                                const side = Math.max(Math.abs(dx), Math.abs(dy));
+                                dx = (dx >= 0 ? 1 : -1) * side;
+                                dy = (dy >= 0 ? 1 : -1) * side;
+                            }
+
+                            if (s.shape === "rect") {
+                                ctx.strokeRect(p0.x, p0.y, dx, dy);
+                            } else if (s.shape === "circle") {
+                                const cx = p0.x + dx / 2;
+                                const cy = p0.y + dy / 2;
+                                const rx = Math.abs(dx) / 2;
+                                const ry = Math.abs(dy) / 2;
+                                if (rx > 0.5 && ry > 0.5) {
+                                    const k = 0.552284749831;
+                                    const ox = rx * k;
+                                    const oy = ry * k;
+                                    ctx.beginPath();
+                                    ctx.moveTo(cx - rx, cy);
+                                    ctx.bezierCurveTo(cx - rx, cy - oy, cx - ox, cy - ry, cx, cy - ry);
+                                    ctx.bezierCurveTo(cx + ox, cy - ry, cx + rx, cy - oy, cx + rx, cy);
+                                    ctx.bezierCurveTo(cx + rx, cy + oy, cx + ox, cy + ry, cx, cy + ry);
+                                    ctx.bezierCurveTo(cx - ox, cy + ry, cx - rx, cy + oy, cx - rx, cy);
+                                    ctx.closePath();
+                                    ctx.stroke();
+                                }
+                            } else {
+                                const endX = p0.x + dx;
+                                const endY = p0.y + dy;
+                                const dist = Math.hypot(dx, dy);
+                                if (dist > 2) {
+                                    const angle = Math.atan2(dy, dx);
+                                    const headLen = Math.min(dist * 0.85, Math.max(16, s.size * 3.6));
+                                    const shaftEndX = endX - Math.cos(angle) * (headLen * 0.5);
+                                    const shaftEndY = endY - Math.sin(angle) * (headLen * 0.5);
+
+                                    ctx.beginPath();
+                                    ctx.moveTo(p0.x, p0.y);
+                                    ctx.lineTo(shaftEndX, shaftEndY);
+                                    ctx.stroke();
+
+                                    ctx.beginPath();
+                                    ctx.moveTo(endX, endY);
+                                    ctx.lineTo(endX - headLen * Math.cos(angle - Math.PI / 6.2), endY - headLen * Math.sin(angle - Math.PI / 6.2));
+                                    ctx.lineTo(endX - (headLen * 0.72) * Math.cos(angle), endY - (headLen * 0.72) * Math.sin(angle));
+                                    ctx.lineTo(endX - headLen * Math.cos(angle + Math.PI / 6.2), endY - headLen * Math.sin(angle + Math.PI / 6.2));
+                                    ctx.closePath();
+                                    ctx.fill();
+                                }
+                            }
                         } else if (pts.length === 1) {
-                            ctx.beginPath();
-                            ctx.arc(pts[0].x, pts[0].y, s.size / 2, 0, Math.PI * 2);
-                            ctx.fill();
+                            if (s.shape === "free" || !s.shape) {
+                                ctx.beginPath();
+                                ctx.arc(pts[0].x, pts[0].y, s.size / 2, 0, Math.PI * 2);
+                                ctx.fill();
+                            }
                         } else {
                             ctx.beginPath();
                             ctx.moveTo(pts[0].x, pts[0].y);
@@ -701,7 +782,12 @@ PluginComponent {
                     root.cursorX = win.modelData.x + mouse.x;
                     root.cursorY = win.modelData.y + mouse.y;
                     if (win.currentStroke) {
-                        win.currentStroke.points.push({ "x": mouse.x, "y": mouse.y });
+                        if (win.currentStroke.shape === "free") {
+                            win.currentStroke.points.push({ "x": mouse.x, "y": mouse.y });
+                        } else {
+                            win.currentStroke.points = [win.currentStroke.points[0], { "x": mouse.x, "y": mouse.y }];
+                            win.currentStroke.proportional = (root.drawTool !== "free") && Boolean(mouse.modifiers & Qt.ShiftModifier);
+                        }
                         win.currentStroke.updatedAt = Date.now();
                         drawCanvas.requestPaint();
                     }
@@ -723,11 +809,18 @@ PluginComponent {
                         if (root.clicksActive) {
                             root.spawnClickEffect("LEFT");
                         }
-                        let shapeMode = "free";
-                        if (mouse.modifiers & Qt.ShiftModifier) {
-                            shapeMode = "line";
-                        } else if (mouse.modifiers & Qt.ControlModifier) {
-                            shapeMode = "rect";
+                        let shapeMode = root.drawTool || "free";
+                        let proportional = false;
+                        if (shapeMode === "free") {
+                            if (mouse.modifiers & Qt.ShiftModifier) {
+                                shapeMode = "arrow";
+                            } else if (mouse.modifiers & Qt.ControlModifier) {
+                                shapeMode = "rect";
+                            } else if (mouse.modifiers & Qt.AltModifier) {
+                                shapeMode = "circle";
+                            }
+                        } else {
+                            proportional = Boolean(mouse.modifiers & Qt.ShiftModifier);
                         }
                         win.currentStroke = {
                             "points": [{ "x": mouse.x, "y": mouse.y }],
@@ -735,6 +828,7 @@ PluginComponent {
                             "size": root.drawSize,
                             "laser": root.drawLaserMode,
                             "shape": shapeMode,
+                            "proportional": proportional,
                             "updatedAt": Date.now()
                         };
                         drawCanvas.requestPaint();
@@ -743,10 +837,14 @@ PluginComponent {
 
                 onReleased: mouse => {
                     if (mouse.button === Qt.LeftButton && win.currentStroke) {
-                        win.currentStroke.updatedAt = Date.now();
-                        const next = win.strokes.slice();
-                        next.push(win.currentStroke);
-                        win.strokes = next;
+                        const s = win.currentStroke;
+                        s.updatedAt = Date.now();
+                        const validShape = s.shape === "free" || (s.points.length >= 2 && Math.hypot(s.points[s.points.length - 1].x - s.points[0].x, s.points[s.points.length - 1].y - s.points[0].y) >= 3);
+                        if (validShape) {
+                            const next = win.strokes.slice();
+                            next.push(s);
+                            win.strokes = next;
+                        }
                         win.currentStroke = null;
                         drawCanvas.requestPaint();
                     }
@@ -754,7 +852,7 @@ PluginComponent {
 
                 onWheel: wheel => {
                     const delta = wheel.angleDelta.y > 0 ? 1 : -1;
-                    root.drawSize = Math.max(2, Math.min(32, root.drawSize + delta));
+                    root.setDrawSize(root.drawSize + delta);
                 }
             }
 
@@ -764,7 +862,7 @@ PluginComponent {
                 y: win.localY - height / 2
                 width: Math.max(8, root.drawSize + 4)
                 height: Math.max(8, root.drawSize + 4)
-                radius: width / 2
+                radius: root.drawTool === "rect" ? 2 : width / 2
                 color: "transparent"
                 border.color: root.drawColor
                 border.width: 2
@@ -783,162 +881,430 @@ PluginComponent {
                         root.undoLastDrawing();
                         event.accepted = true;
                     } else if (event.key === Qt.Key_L) {
-                        root.drawLaserMode = !root.drawLaserMode;
+                        root.toggleLaserMode();
                         event.accepted = true;
                     } else if (event.key === Qt.Key_B) {
                         root.toggleSpotlight();
                         event.accepted = true;
+                    } else if (event.key === Qt.Key_P || event.key === Qt.Key_F) {
+                        root.setDrawTool("free");
+                        event.accepted = true;
+                    } else if (event.key === Qt.Key_A) {
+                        root.setDrawTool("arrow");
+                        event.accepted = true;
+                    } else if (event.key === Qt.Key_O || event.key === Qt.Key_E) {
+                        root.setDrawTool("circle");
+                        event.accepted = true;
+                    } else if (event.key === Qt.Key_R) {
+                        root.setDrawTool("rect");
+                        event.accepted = true;
+                    } else if (event.key === Qt.Key_Minus || event.key === Qt.Key_BracketLeft) {
+                        root.setDrawSize(root.drawSize - 2);
+                        event.accepted = true;
+                    } else if (event.key === Qt.Key_Plus || event.key === Qt.Key_Equal || event.key === Qt.Key_BracketRight) {
+                        root.setDrawSize(root.drawSize + 2);
+                        event.accepted = true;
                     } else if (event.key >= Qt.Key_1 && event.key <= Qt.Key_6) {
                         const idx = event.key - Qt.Key_1;
                         if (idx >= 0 && idx < root.paletteColors.length) {
-                            root.drawColor = root.paletteColors[idx];
+                            root.setDrawColor(root.paletteColors[idx]);
                         }
                         event.accepted = true;
                     }
                 }
             }
 
-            // Floating HUD Toolbar for Draw Mode
+            // Floating Paint HUD Toolbar for Draw Mode
             Rectangle {
                 id: drawHud
                 visible: root.drawActive && win.cursorOnScreen
                 anchors.top: parent.top
-                anchors.topMargin: 28
+                anchors.topMargin: 22
                 anchors.horizontalCenter: parent.horizontalCenter
-                width: hudRow.implicitWidth + 28
-                height: 48
-                radius: 24
-                color: Qt.rgba(0.08, 0.09, 0.12, 0.92)
+                width: hudCol.implicitWidth + 32
+                height: hudCol.implicitHeight + 22
+                radius: 22
+                color: Qt.rgba(0.07, 0.08, 0.11, 0.94)
                 border.color: Qt.rgba(1, 1, 1, 0.18)
                 border.width: 1
 
-                Row {
-                    id: hudRow
-                    anchors.centerIn: parent
-                    spacing: 10
+                // Prevent clicks inside the HUD from drawing on the canvas behind it
+                MouseArea {
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    acceptedButtons: Qt.AllButtons
+                    onPositionChanged: mouse => {
+                        const pt = drawHud.mapToItem(null, mouse.x, mouse.y);
+                        root.cursorX = win.modelData.x + pt.x;
+                        root.cursorY = win.modelData.y + pt.y;
+                    }
+                    onWheel: wheel => {
+                        const delta = wheel.angleDelta.y > 0 ? 1 : -1;
+                        root.setDrawSize(root.drawSize + delta);
+                    }
+                }
 
-                    Repeater {
-                        model: root.paletteColors
+                Column {
+                    id: hudCol
+                    anchors.centerIn: parent
+                    spacing: 8
+
+                    // ROW 1: Tools (Pincel, Flecha, Círculo, Cuadrado) + Grosor + Colores
+                    Row {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        spacing: 8
+
+                        // Shape / Tool selector buttons
+                        Row {
+                            spacing: 5
+                            anchors.verticalCenter: parent.verticalCenter
+
+                            Repeater {
+                                model: root.drawTools
+
+                                Rectangle {
+                                    required property var modelData
+                                    readonly property bool isSelected: root.drawTool === modelData.id
+                                    height: 32
+                                    width: toolRow.implicitWidth + 18
+                                    radius: 16
+                                    color: isSelected ? Qt.rgba(0.18, 0.56, 1.0, 0.38) : Qt.rgba(1, 1, 1, 0.08)
+                                    border.color: isSelected ? "#4dabf7" : Qt.rgba(1, 1, 1, 0.12)
+                                    border.width: isSelected ? 1.5 : 1
+
+                                    Row {
+                                        id: toolRow
+                                        anchors.centerIn: parent
+                                        spacing: 5
+
+                                        DIcon {
+                                            name: modelData.icon
+                                            size: 16
+                                            color: isSelected ? "#ffffff" : "#d0d7de"
+                                            anchors.verticalCenter: parent.verticalCenter
+                                        }
+
+                                        Text {
+                                            text: modelData.label + " (" + modelData.key + ")"
+                                            color: isSelected ? "#ffffff" : "#d0d7de"
+                                            font.pixelSize: 12
+                                            font.bold: isSelected
+                                            anchors.verticalCenter: parent.verticalCenter
+                                        }
+                                    }
+
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: root.setDrawTool(modelData.id)
+                                    }
+                                }
+                            }
+                        }
 
                         Rectangle {
-                            required property string modelData
-                            required property int index
-                            width: 24
+                            width: 1
                             height: 24
-                            radius: 12
+                            color: Qt.rgba(1, 1, 1, 0.2)
                             anchors.verticalCenter: parent.verticalCenter
-                            color: modelData
-                            border.color: root.drawColor === modelData ? "#ffffff" : Qt.rgba(0, 0, 0, 0.4)
-                            border.width: root.drawColor === modelData ? 3 : 1
-                            scale: root.drawColor === modelData ? 1.15 : 1.0
+                        }
 
-                            MouseArea {
-                                anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: root.drawColor = modelData
+                        // Thickness (Grosor) interactive control: [ - ] [ slider + preview ] [ + ]
+                        Row {
+                            spacing: 5
+                            anchors.verticalCenter: parent.verticalCenter
+
+                            Rectangle {
+                                width: 28
+                                height: 28
+                                radius: 14
+                                anchors.verticalCenter: parent.verticalCenter
+                                color: Qt.rgba(1, 1, 1, 0.1)
+
+                                DIcon {
+                                    anchors.centerIn: parent
+                                    name: "remove"
+                                    size: 16
+                                    color: "#ffffff"
+                                }
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: root.setDrawSize(root.drawSize - 2)
+                                }
+                            }
+
+                            Rectangle {
+                                id: sizeSliderPill
+                                width: 132
+                                height: 30
+                                radius: 15
+                                anchors.verticalCenter: parent.verticalCenter
+                                color: Qt.rgba(1, 1, 1, 0.07)
+                                border.color: Qt.rgba(1, 1, 1, 0.14)
+                                border.width: 1
+
+                                Row {
+                                    anchors.centerIn: parent
+                                    spacing: 7
+
+                                    // Live brush dot preview
+                                    Item {
+                                        width: 20
+                                        height: 20
+                                        anchors.verticalCenter: parent.verticalCenter
+
+                                        Rectangle {
+                                            anchors.centerIn: parent
+                                            width: Math.max(4, Math.min(20, root.drawSize * 0.65))
+                                            height: width
+                                            radius: width / 2
+                                            color: root.drawColor
+                                            border.color: "#ffffff"
+                                            border.width: 1
+                                        }
+                                    }
+
+                                    // Interactive slider track
+                                    Item {
+                                        id: sizeTrack
+                                        width: 58
+                                        height: 22
+                                        anchors.verticalCenter: parent.verticalCenter
+
+                                        Rectangle {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            width: parent.width
+                                            height: 6
+                                            radius: 3
+                                            color: Qt.rgba(1, 1, 1, 0.2)
+
+                                            Rectangle {
+                                                width: Math.max(4, ((root.drawSize - 2) / 30.0) * parent.width)
+                                                height: parent.height
+                                                radius: 3
+                                                color: root.drawColor
+                                            }
+                                        }
+
+                                        Rectangle {
+                                            width: 12
+                                            height: 12
+                                            radius: 6
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            x: Math.max(0, Math.min(parent.width - width, ((root.drawSize - 2) / 30.0) * (parent.width - width)))
+                                            color: "#ffffff"
+                                            border.color: Qt.rgba(0, 0, 0, 0.4)
+                                            border.width: 1
+                                        }
+
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            cursorShape: Qt.PointingHandCursor
+                                            function updateFromMouse(mx) {
+                                                const ratio = Math.max(0.0, Math.min(1.0, mx / sizeTrack.width));
+                                                root.setDrawSize(2 + ratio * 30);
+                                            }
+                                            onPressed: mouse => updateFromMouse(mouse.x)
+                                            onPositionChanged: mouse => {
+                                                if (pressed)
+                                                    updateFromMouse(mouse.x);
+                                            }
+                                        }
+                                    }
+
+                                    Text {
+                                        text: Math.round(root.drawSize) + "px"
+                                        color: "#ffffff"
+                                        font.pixelSize: 11
+                                        font.bold: true
+                                        width: 28
+                                        horizontalAlignment: Text.AlignRight
+                                        anchors.verticalCenter: parent.verticalCenter
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                width: 28
+                                height: 28
+                                radius: 14
+                                anchors.verticalCenter: parent.verticalCenter
+                                color: Qt.rgba(1, 1, 1, 0.1)
+
+                                DIcon {
+                                    anchors.centerIn: parent
+                                    name: "add"
+                                    size: 16
+                                    color: "#ffffff"
+                                }
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: root.setDrawSize(root.drawSize + 2)
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            width: 1
+                            height: 24
+                            color: Qt.rgba(1, 1, 1, 0.2)
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+
+                        // Color Palette (1 - 6)
+                        Row {
+                            spacing: 7
+                            anchors.verticalCenter: parent.verticalCenter
+
+                            Repeater {
+                                model: root.paletteColors
+
+                                Rectangle {
+                                    required property string modelData
+                                    required property int index
+                                    width: 24
+                                    height: 24
+                                    radius: 12
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    color: modelData
+                                    border.color: root.drawColor === modelData ? "#ffffff" : Qt.rgba(0, 0, 0, 0.4)
+                                    border.width: root.drawColor === modelData ? 3 : 1
+                                    scale: root.drawColor === modelData ? 1.15 : 1.0
+
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: root.setDrawColor(modelData)
+                                    }
+                                }
                             }
                         }
                     }
 
-                    Rectangle {
-                        width: 1
-                        height: 24
-                        color: Qt.rgba(1, 1, 1, 0.2)
-                        anchors.verticalCenter: parent.verticalCenter
-                    }
+                    // ROW 2: Mode toggles (Láser/Fijo, Blur), History (Deshacer, Limpiar), Salir & Quick Hint
+                    Row {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        spacing: 8
 
-                    Rectangle {
-                        height: 30
-                        width: laserLabel.implicitWidth + 18
-                        radius: 15
-                        anchors.verticalCenter: parent.verticalCenter
-                        color: root.drawLaserMode ? Qt.rgba(1, 0.28, 0.34, 0.35) : Qt.rgba(1, 1, 1, 0.08)
-                        border.color: root.drawLaserMode ? "#ff4757" : "transparent"
-                        border.width: 1
+                        Rectangle {
+                            height: 28
+                            width: laserLabel.implicitWidth + 18
+                            radius: 14
+                            anchors.verticalCenter: parent.verticalCenter
+                            color: root.drawLaserMode ? Qt.rgba(1, 0.28, 0.34, 0.35) : Qt.rgba(1, 1, 1, 0.08)
+                            border.color: root.drawLaserMode ? "#ff4757" : "transparent"
+                            border.width: 1
 
-                        Text {
-                            id: laserLabel
-                            anchors.centerIn: parent
-                            text: root.drawLaserMode ? "Láser (L)" : "Fijo (L)"
-                            color: "#ffffff"
-                            font.pixelSize: 12
-                            font.bold: root.drawLaserMode
+                            Text {
+                                id: laserLabel
+                                anchors.centerIn: parent
+                                text: root.drawLaserMode ? "Modo: Láser (L)" : "Modo: Fijo (L)"
+                                color: "#ffffff"
+                                font.pixelSize: 11
+                                font.bold: root.drawLaserMode
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: root.toggleLaserMode()
+                            }
                         }
 
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: root.drawLaserMode = !root.drawLaserMode
-                        }
-                    }
+                        Rectangle {
+                            height: 28
+                            width: blurLabel.implicitWidth + 18
+                            radius: 14
+                            anchors.verticalCenter: parent.verticalCenter
+                            color: root.spotlightActive ? Qt.rgba(0.12, 0.56, 1.0, 0.35) : Qt.rgba(1, 1, 1, 0.08)
+                            border.color: root.spotlightActive ? "#1e90ff" : "transparent"
+                            border.width: 1
 
-                    Rectangle {
-                        height: 30
-                        width: blurLabel.implicitWidth + 18
-                        radius: 15
-                        anchors.verticalCenter: parent.verticalCenter
-                        color: root.spotlightActive ? Qt.rgba(0.12, 0.56, 1.0, 0.35) : Qt.rgba(1, 1, 1, 0.08)
-                        border.color: root.spotlightActive ? "#1e90ff" : "transparent"
-                        border.width: 1
+                            Text {
+                                id: blurLabel
+                                anchors.centerIn: parent
+                                text: "Spotlight Blur (B)"
+                                color: "#ffffff"
+                                font.pixelSize: 11
+                                font.bold: root.spotlightActive
+                            }
 
-                        Text {
-                            id: blurLabel
-                            anchors.centerIn: parent
-                            text: "Blur (B)"
-                            color: "#ffffff"
-                            font.pixelSize: 12
-                            font.bold: root.spotlightActive
-                        }
-
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: root.toggleSpotlight()
-                        }
-                    }
-
-                    Rectangle {
-                        height: 30
-                        width: clearLabel.implicitWidth + 18
-                        radius: 15
-                        anchors.verticalCenter: parent.verticalCenter
-                        color: Qt.rgba(1, 1, 1, 0.08)
-
-                        Text {
-                            id: clearLabel
-                            anchors.centerIn: parent
-                            text: "Limpiar (C)"
-                            color: "#ffffff"
-                            font.pixelSize: 12
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: root.toggleSpotlight()
+                            }
                         }
 
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: root.clearAllDrawings()
+                        Rectangle {
+                            height: 28
+                            width: undoLabel.implicitWidth + 18
+                            radius: 14
+                            anchors.verticalCenter: parent.verticalCenter
+                            color: Qt.rgba(1, 1, 1, 0.08)
+
+                            Text {
+                                id: undoLabel
+                                anchors.centerIn: parent
+                                text: "Deshacer (Z / Click Der)"
+                                color: "#ffffff"
+                                font.pixelSize: 11
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: root.undoLastDrawing()
+                            }
                         }
-                    }
 
-                    Rectangle {
-                        height: 30
-                        width: exitLabel.implicitWidth + 18
-                        radius: 15
-                        anchors.verticalCenter: parent.verticalCenter
-                        color: Qt.rgba(1, 0.3, 0.3, 0.25)
+                        Rectangle {
+                            height: 28
+                            width: clearLabel.implicitWidth + 18
+                            radius: 14
+                            anchors.verticalCenter: parent.verticalCenter
+                            color: Qt.rgba(1, 1, 1, 0.08)
 
-                        Text {
-                            id: exitLabel
-                            anchors.centerIn: parent
-                            text: "Salir (Esc)"
-                            color: "#ff9999"
-                            font.pixelSize: 12
-                            font.bold: true
+                            Text {
+                                id: clearLabel
+                                anchors.centerIn: parent
+                                text: "Limpiar (C)"
+                                color: "#ffffff"
+                                font.pixelSize: 11
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: root.clearAllDrawings()
+                            }
                         }
 
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: root.drawActive = false
+                        Rectangle {
+                            height: 28
+                            width: exitLabel.implicitWidth + 18
+                            radius: 14
+                            anchors.verticalCenter: parent.verticalCenter
+                            color: Qt.rgba(1, 0.3, 0.3, 0.25)
+
+                            Text {
+                                id: exitLabel
+                                anchors.centerIn: parent
+                                text: "Salir (Esc)"
+                                color: "#ff9999"
+                                font.pixelSize: 11
+                                font.bold: true
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: root.drawActive = false
+                            }
                         }
                     }
                 }
