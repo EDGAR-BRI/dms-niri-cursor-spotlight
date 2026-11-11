@@ -4,7 +4,6 @@ import Quickshell.Io
 import qs.Common
 import qs.Services
 import qs.Widgets
-import qs.DCommon.Widgets
 import qs.Modules.Plugins
 
 PluginSettings {
@@ -341,7 +340,7 @@ PluginSettings {
 
                     Row {
                         spacing: 8
-                        DIcon {
+                        DankIcon {
                             name: root.updateStatus === "available" ? "system_update" : (root.updateStatus === "checking" || root.updateStatus === "updating" ? "sync" : (root.updateStatus === "error" ? "error" : "check_circle"))
                             size: 20
                             color: root.updateStatus === "available" ? "#4dabf7" : (root.updateStatus === "error" ? Theme.error : "#2ed573")
@@ -371,22 +370,87 @@ PluginSettings {
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: Theme.spacingS
 
-                    DButton {
-                        text: "Comprobar"
-                        iconName: "refresh"
-                        variant: "outlined"
-                        busy: root.updateStatus === "checking"
-                        enabled: root.updateStatus !== "checking" && root.updateStatus !== "updating"
-                        onClicked: root.checkForUpdates()
+                    Rectangle {
+                        id: checkBtn
+                        height: 32
+                        width: checkBtnRow.implicitWidth + 24
+                        radius: 16
+                        anchors.verticalCenter: parent.verticalCenter
+                        color: checkBtnMa.pressed ? Qt.rgba(1, 1, 1, 0.15) : (checkBtnMa.containsMouse ? Qt.rgba(1, 1, 1, 0.1) : Qt.rgba(1, 1, 1, 0.06))
+                        border.color: Qt.rgba(1, 1, 1, 0.18)
+                        border.width: 1
+
+                        Row {
+                            id: checkBtnRow
+                            anchors.centerIn: parent
+                            spacing: 6
+                            DankIcon {
+                                name: "refresh"
+                                size: 16
+                                color: Theme.surfaceText
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+                            StyledText {
+                                text: root.updateStatus === "checking" ? "Comprobando..." : "Comprobar"
+                                font.pixelSize: Theme.fontSizeSmall
+                                font.weight: Font.Medium
+                                color: Theme.surfaceText
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+                        }
+
+                        MouseArea {
+                            id: checkBtnMa
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            enabled: root.updateStatus !== "checking" && root.updateStatus !== "updating"
+                            onClicked: root.checkForUpdates()
+                        }
                     }
 
-                    DButton {
-                        text: "Actualizar"
-                        iconName: "download"
-                        variant: root.updateStatus === "available" ? "filled" : "tonal"
-                        busy: root.updateStatus === "updating"
-                        enabled: root.updateStatus === "available" && root.updateStatus !== "updating"
-                        onClicked: root.applyUpdate()
+                    Rectangle {
+                        id: updateBtn
+                        height: 32
+                        width: updateBtnRow.implicitWidth + 24
+                        radius: 16
+                        anchors.verticalCenter: parent.verticalCenter
+                        color: {
+                            if (root.updateStatus !== "available") return Qt.rgba(1, 1, 1, 0.05);
+                            if (updateBtnMa.pressed) return Qt.darker(Theme.primary, 1.2);
+                            if (updateBtnMa.containsMouse) return Qt.lighter(Theme.primary, 1.1);
+                            return Theme.primary;
+                        }
+                        border.color: root.updateStatus === "available" ? Theme.primary : Qt.rgba(1, 1, 1, 0.12)
+                        border.width: 1
+
+                        Row {
+                            id: updateBtnRow
+                            anchors.centerIn: parent
+                            spacing: 6
+                            DankIcon {
+                                name: "download"
+                                size: 16
+                                color: root.updateStatus === "available" ? Theme.buttonText : Qt.rgba(1, 1, 1, 0.3)
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+                            StyledText {
+                                text: root.updateStatus === "updating" ? "Actualizando..." : "Actualizar"
+                                font.pixelSize: Theme.fontSizeSmall
+                                font.weight: Font.Bold
+                                color: root.updateStatus === "available" ? Theme.buttonText : Qt.rgba(1, 1, 1, 0.3)
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+                        }
+
+                        MouseArea {
+                            id: updateBtnMa
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: root.updateStatus === "available" ? Qt.PointingHandCursor : Qt.ArrowCursor
+                            enabled: root.updateStatus === "available" && root.updateStatus !== "updating"
+                            onClicked: root.applyUpdate()
+                        }
                     }
                 }
             }
