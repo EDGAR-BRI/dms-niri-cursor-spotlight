@@ -13,7 +13,7 @@ PluginComponent {
 
     // Core feature states
     property bool spotlightActive: false
-    property bool clicksActive: pluginData.clicksActive !== undefined ? pluginData.clicksActive : false
+    property bool clicksActive: pluginData.clicksActive !== undefined ? Boolean(pluginData.clicksActive) : false
     property bool drawActive: false
 
     // Cursor tracking state (global logical coordinates across all outputs)
@@ -21,8 +21,13 @@ PluginComponent {
     property real cursorY: -1
     property bool hasCursorPos: cursorX >= 0 && cursorY >= 0
     property bool mouseButtonHeld: false
-    property string helperPermStatus: "OK"
+    property string helperPermStatus: "UNKNOWN"
     property bool permPromptShown: false
+
+    // Click pulse animation state for the cursor halo itself
+    property real haloScale: 1.0
+    property real clickFlash: 0.0
+    property color activeClickColor: Theme.primary
 
     readonly property bool anyActive: spotlightActive || clicksActive || drawActive
     readonly property string pluginDir: Qt.resolvedUrl(".").toString().replace(/^file:\/\//, "").replace(/\/$/, "")
@@ -33,8 +38,8 @@ PluginComponent {
     readonly property int spotlightAutoHideMs: pluginData.spotlightAutoHideMs !== undefined ? Number(pluginData.spotlightAutoHideMs) : 0
     readonly property real spotlightRingWidth: Number(pluginData.spotlightRingWidth) || 3
 
-    readonly property real rippleSize: Number(pluginData.rippleSize) || 48
-    readonly property int rippleDuration: Number(pluginData.rippleDuration) || 420
+    readonly property real rippleSize: Number(pluginData.rippleSize) || 58
+    readonly property int rippleDuration: Number(pluginData.rippleDuration) || 460
     readonly property bool showHaloWithClicks: pluginData.showHaloWithClicks !== undefined ? Boolean(pluginData.showHaloWithClicks) : true
     readonly property real haloRadius: Number(pluginData.haloRadius) || 20
 
@@ -42,7 +47,6 @@ PluginComponent {
     property string drawColor: pluginData.drawColor || "#ff4757"
     property real drawSize: Number(pluginData.drawSize) || 5
     property bool drawLaserMode: pluginData.drawLaserMode !== undefined ? Boolean(pluginData.drawLaserMode) : false
-    property int strokeRevision: 0
 
     readonly property var paletteColors: [
         "#ff4757", // 1: Red
@@ -53,13 +57,10 @@ PluginComponent {
         "#ffffff"  // 6: White
     ]
 
-    ListModel {
-        id: ripplesModel
-    }
-
-    // Signals to broadcast draw actions to all screen canvases
+    // Signals for cross-screen synchronization
     signal clearAllDrawings()
     signal undoLastDrawing()
+    signal clickTriggered(real gx, real gy, string btn)
 
     function savePluginSetting(key, value) {
         if (pluginService && pluginService.savePluginData) {
@@ -72,7 +73,12 @@ PluginComponent {
     }
 
     function requestInputPermissions() {
-        const cmd = "usermod -aG input $USER && setfacl -m u:$USER:r /dev/input/event*";
+        const udevRule1 = 'SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_MOUSE}=="1", TAG+="uaccess"';
+        const udevRule2 = 'SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_TOUCHPAD}=="1", TAG+="uaccess"';
+        const cmd = "usermod -aG input $USER || true; " +
+                    "printf '%s\\n%s\\n' '" + udevRule1 + "' '" + udevRule2 + "' > /etc/udev/rules.d/70-dms-cursor-spotlight.rules; " +
+                    "udevadm control --reload-rules && udevadm trigger --subsystem-match=input || true; " +
+                    "setfacl -m u:$USER:r /dev/input/event* || true";
         Quickshell.execDetached(["pkexec", "sh", "-c", cmd]);
     }
 
@@ -98,12 +104,13 @@ PluginComponent {
 
     function toggleClicks() {
         const next = !clicksActive;
+        clicksActive = next;
         savePluginSetting("clicksActive", next);
         if (next) {
             nudgeTimer.restart();
             if (helperPermStatus === "NEEDS_PERM" && !permPromptShown) {
                 permPromptShown = true;
-                ToastService.showInfo("Habilitando permisos de lectura de clicks del ratón...");
+                ToastService.showInfo("Autoriza el permiso de entrada para detectar los clicks del ratón");
                 requestInputPermissions();
             } else {
                 ToastService.showInfo("Destacado de clicks activado");
@@ -121,14 +128,55 @@ PluginComponent {
         }
     }
 
-    function spawnRipple(btn) {
+    function spawnClickEffect(btn) {
         if (!hasCursorPos)
             return;
-        ripplesModel.append({
-            "rx": root.cursorX,
-            "ry": root.cursorY,
-            "btn": btn || "LEFT"
-        });
+        const b = btn || "LEFT";
+        if (b === "RIGHT") {
+            activeClickColor = "#ffa502";
+        } else if (b === "MIDDLE") {
+            activeClickColor = "#00d2d3";
+        } else {
+            activeClickColor = Theme.primary;
+        }
+        haloPulseAnim.restart();
+        root.clickTriggered(root.cursorX, root.cursorY, b);
+    }
+
+    // Growing / bounce animation for the cursor halo when clicking
+    ParallelAnimation {
+        id: haloPulseAnim
+
+        SequentialAnimation {
+            NumberAnimation {
+                target: root
+                property: "haloScale"
+                from: 0.75
+                to: 1.75
+                duration: 150
+                easing.type: Easing.OutBack
+                easing.overshoot: 2.2
+            }
+            NumberAnimation {
+                target: root
+                property: "haloScale"
+                from: 1.75
+                to: 1.0
+                duration: 260
+                easing.type: Easing.OutCubic
+            }
+        }
+
+        SequentialAnimation {
+            NumberAnimation {
+                target: root
+                property: "clickFlash"
+                from: 1.0
+                to: 0.0
+                duration: 380
+                easing.type: Easing.OutQuad
+            }
+        }
     }
 
     Timer {
@@ -210,16 +258,21 @@ PluginComponent {
                 const cmd = parts[0];
 
                 if (cmd === "STATUS") {
-                    root.helperPermStatus = parts[1] || "OK";
+                    const st = parts[1] || "OK";
+                    root.helperPermStatus = st;
+                    if (st === "NEEDS_PERM" && root.clicksActive && !root.permPromptShown) {
+                        root.permPromptShown = true;
+                        ToastService.showInfo("Autoriza el permiso una vez para animar los clicks del ratón");
+                        root.requestInputPermissions();
+                    }
                 } else if (cmd === "DOWN") {
                     const btn = parts[1] || "LEFT";
                     root.mouseButtonHeld = true;
-                    if (root.clicksActive && !root.drawActive) {
-                        root.spawnRipple(btn);
+                    if (root.clicksActive || root.spotlightActive) {
+                        root.spawnClickEffect(btn);
                     }
                 } else if (cmd === "UP") {
                     root.mouseButtonHeld = false;
-                    // Re-sync exact Wayland coordinates on release
                     root.nudgeCursor();
                 } else if (cmd === "MOVE" && parts.length >= 3) {
                     const dx = parseInt(parts[1]);
@@ -246,6 +299,9 @@ PluginComponent {
             readonly property real localY: root.cursorY - modelData.y
             readonly property bool cursorOnScreen: root.hasCursorPos && localX >= 0 && localY >= 0 && localX < modelData.width && localY < modelData.height
 
+            // Active click ripples on this screen
+            property var activeRipples: []
+
             // Drawing state per screen
             property var strokes: []
             property var currentStroke: null
@@ -266,11 +322,6 @@ PluginComponent {
                 right: true
             }
 
-            // Input mask:
-            // - In draw mode: full screen captures pointer input for drawing.
-            // - While mouseButtonHeld (dragging on underlying window): 0x0 so drags are never interrupted.
-            // - In spotlight/clicks mode: full screen minus a 6x6 hole right under the cursor tip,
-            //   allowing all clicks/scrolls to pass straight through while tracking any movement >=3px.
             mask: Region {
                 x: 0
                 y: 0
@@ -286,7 +337,7 @@ PluginComponent {
                 }
             }
 
-            // Compositor Background Blur (ext-background-effect-v1) with Spotlight circular cutout!
+            // Compositor Background Blur (ext-background-effect-v1) with Spotlight circular cutout
             Region {
                 id: spotlightBlurRegion
                 x: 0
@@ -319,6 +370,21 @@ PluginComponent {
                         drawCanvas.requestPaint();
                     }
                 }
+                function onClickTriggered(gx, gy, btn) {
+                    const lx = gx - win.modelData.x;
+                    const ly = gy - win.modelData.y;
+                    if (lx >= -100 && ly >= -100 && lx <= win.width + 100 && ly <= win.height + 100) {
+                        const next = win.activeRipples.slice();
+                        next.push({
+                            "x": lx,
+                            "y": ly,
+                            "btn": btn,
+                            "startTime": Date.now()
+                        });
+                        win.activeRipples = next;
+                        rippleCanvas.requestPaint();
+                    }
+                }
             }
 
             // Track pointer coordinates whenever Wayland delivers pointer enter/motion
@@ -341,15 +407,16 @@ PluginComponent {
                 property real cx: win.localX
                 property real cy: win.localY
                 property bool onScreen: win.cursorOnScreen
-                property real sRadius: root.spotlightRadius
+                property real sRadius: root.spotlightRadius * (1.0 + root.clickFlash * 0.12)
                 property real dimAlpha: root.spotlightDimOpacity
-                property color ringColor: Theme.primary
+                property color ringColor: root.clickFlash > 0.05 ? root.activeClickColor : Theme.primary
 
                 onCxChanged: if (visible) requestPaint()
                 onCyChanged: if (visible) requestPaint()
                 onOnScreenChanged: if (visible) requestPaint()
                 onSRadiusChanged: if (visible) requestPaint()
                 onDimAlphaChanged: if (visible) requestPaint()
+                onRingColorChanged: if (visible) requestPaint()
                 onVisibleChanged: if (visible) requestPaint()
 
                 onPaint: {
@@ -368,25 +435,16 @@ PluginComponent {
 
                     // Draw glowing accent ring around the spotlight hole
                     if (onScreen) {
-                        // Outer soft glow
                         ctx.beginPath();
                         ctx.arc(cx, cy, sRadius + 3, 0, Math.PI * 2);
-                        ctx.strokeStyle = Qt.rgba(ringColor.r, ringColor.g, ringColor.b, 0.35);
+                        ctx.strokeStyle = Qt.rgba(ringColor.r, ringColor.g, ringColor.b, 0.35 + root.clickFlash * 0.4);
                         ctx.lineWidth = root.spotlightRingWidth + 6;
                         ctx.stroke();
 
-                        // Crisp inner ring
                         ctx.beginPath();
                         ctx.arc(cx, cy, sRadius, 0, Math.PI * 2);
                         ctx.strokeStyle = ringColor;
-                        ctx.lineWidth = root.spotlightRingWidth;
-                        ctx.stroke();
-
-                        // Crosshair subtle center ring around pointer tip
-                        ctx.beginPath();
-                        ctx.arc(cx, cy, 14, 0, Math.PI * 2);
-                        ctx.strokeStyle = Qt.rgba(ringColor.r, ringColor.g, ringColor.b, 0.75);
-                        ctx.lineWidth = 2;
+                        ctx.lineWidth = root.spotlightRingWidth + root.clickFlash * 2;
                         ctx.stroke();
                     }
 
@@ -394,80 +452,123 @@ PluginComponent {
                 }
             }
 
-            // 2. SUBTLE CURSOR HALO (when clicksActive & showHaloWithClicks)
+            // 2. CURSOR HALO WITH GROW/PULSE EFFECT ON CLICK
             Rectangle {
+                id: cursorHalo
                 visible: root.clicksActive && root.showHaloWithClicks && win.cursorOnScreen && !root.drawActive
-                x: win.localX - width / 2
-                y: win.localY - height / 2
-                width: root.haloRadius * 2
-                height: root.haloRadius * 2
-                radius: root.haloRadius
-                color: Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.14)
-                border.color: Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.75)
-                border.width: 2
+                readonly property real currentRadius: root.haloRadius * root.haloScale
+                readonly property color baseColor: root.clickFlash > 0.05 ? root.activeClickColor : Theme.primary
+
+                x: win.localX - currentRadius
+                y: win.localY - currentRadius
+                width: currentRadius * 2
+                height: currentRadius * 2
+                radius: currentRadius
+                color: Qt.rgba(baseColor.r, baseColor.g, baseColor.b, 0.14 + root.clickFlash * 0.32)
+                border.color: Qt.rgba(baseColor.r, baseColor.g, baseColor.b, 0.8 + root.clickFlash * 0.2)
+                border.width: 2.2 + root.clickFlash * 2.5
+
+                // Inner center dot that pops on click
+                Rectangle {
+                    anchors.centerIn: parent
+                    width: 6 + root.clickFlash * 8
+                    height: width
+                    radius: width / 2
+                    color: cursorHalo.baseColor
+                    opacity: 0.45 + root.clickFlash * 0.55
+                }
             }
 
-            // 3. ANIMATED CLICK RIPPLES
-            Repeater {
-                model: ripplesModel
+            // 3. HIGH-FPS CLICK SHOCKWAVE + RADIAL BURST CANVAS
+            Canvas {
+                id: rippleCanvas
+                anchors.fill: parent
+                visible: win.activeRipples.length > 0
 
-                Item {
-                    id: rippleItem
-                    required property int index
-                    required property real rx
-                    required property real ry
-                    required property string btn
+                onPaint: {
+                    const ctx = getContext("2d");
+                    ctx.save();
+                    ctx.clearRect(0, 0, width, height);
 
-                    readonly property real localRx: rx - win.modelData.x
-                    readonly property real localRy: ry - win.modelData.y
-                    readonly property color rippleColor: btn === "RIGHT" ? "#ffa502" : (btn === "MIDDLE" ? "#00d2d3" : Theme.primary)
+                    const now = Date.now();
+                    const dur = root.rippleDuration;
+                    const maxR = root.rippleSize;
 
-                    property real animProgress: 0.0
+                    for (let i = 0; i < win.activeRipples.length; i++) {
+                        const r = win.activeRipples[i];
+                        const p = Math.min(1.0, Math.max(0.0, (now - r.startTime) / dur));
+                        if (p >= 1.0)
+                            continue;
 
-                    x: localRx
-                    y: localRy
-                    visible: localRx >= -100 && localRy >= -100 && localRx <= win.width + 100 && localRy <= win.height + 100
+                        // Cubic ease-out for smooth expansion
+                        const ease = 1.0 - Math.pow(1.0 - p, 3);
+                        const alpha = 1.0 - p;
 
-                    NumberAnimation on animProgress {
-                        from: 0.0
-                        to: 1.0
-                        duration: root.rippleDuration
-                        easing.type: Easing.OutCubic
-                        running: true
-                        onFinished: {
-                            if (rippleItem.index >= 0 && rippleItem.index < ripplesModel.count) {
-                                ripplesModel.remove(rippleItem.index);
+                        let c = Theme.primary;
+                        if (r.btn === "RIGHT") {
+                            c = Qt.rgba(1.0, 0.647, 0.008, 1.0); // #ffa502
+                        } else if (r.btn === "MIDDLE") {
+                            c = Qt.rgba(0.0, 0.824, 0.827, 1.0); // #00d2d3
+                        }
+
+                        // 1) Expanding outer shockwave ring
+                        const outerR = 10 + (maxR - 10) * ease;
+                        ctx.beginPath();
+                        ctx.arc(r.x, r.y, outerR, 0, Math.PI * 2);
+                        ctx.fillStyle = Qt.rgba(c.r, c.g, c.b, 0.24 * (1.0 - ease));
+                        ctx.fill();
+                        ctx.lineWidth = Math.max(1.5, 4.5 * alpha);
+                        ctx.strokeStyle = Qt.rgba(c.r, c.g, c.b, 0.95 * alpha);
+                        ctx.stroke();
+
+                        // 2) Secondary inner wave
+                        if (p > 0.1) {
+                            const p2 = (p - 0.1) / 0.9;
+                            const ease2 = 1.0 - Math.pow(1.0 - p2, 2);
+                            const innerR = 6 + (maxR * 0.68) * ease2;
+                            ctx.beginPath();
+                            ctx.arc(r.x, r.y, innerR, 0, Math.PI * 2);
+                            ctx.lineWidth = Math.max(1.0, 2.5 * (1.0 - p2));
+                            ctx.strokeStyle = Qt.rgba(1, 1, 1, 0.75 * (1.0 - p2));
+                            ctx.stroke();
+                        }
+
+                        // 3) 8 Radial burst rays shooting outward
+                        if (p < 0.75) {
+                            const rayP = p / 0.75;
+                            const rayAlpha = 1.0 - rayP;
+                            const rStart = 14 + (maxR * 0.55) * ease;
+                            const rEnd = rStart + 10 * (1.0 - rayP * 0.5);
+                            ctx.strokeStyle = Qt.rgba(c.r, c.g, c.b, 0.85 * rayAlpha);
+                            ctx.lineWidth = 2.2;
+                            ctx.lineCap = "round";
+                            for (let k = 0; k < 8; k++) {
+                                const ang = (k * Math.PI) / 4;
+                                ctx.beginPath();
+                                ctx.moveTo(r.x + Math.cos(ang) * rStart, r.y + Math.sin(ang) * rStart);
+                                ctx.lineTo(r.x + Math.cos(ang) * rEnd, r.y + Math.sin(ang) * rEnd);
+                                ctx.stroke();
                             }
                         }
                     }
 
-                    // Outer expanding wave
-                    Rectangle {
-                        readonly property real curRadius: 8 + (root.rippleSize - 8) * rippleItem.animProgress
-                        x: -curRadius
-                        y: -curRadius
-                        width: curRadius * 2
-                        height: curRadius * 2
-                        radius: curRadius
-                        color: Qt.rgba(rippleItem.rippleColor.r, rippleItem.rippleColor.g, rippleItem.rippleColor.b, 0.22 * (1.0 - rippleItem.animProgress))
-                        border.color: Qt.rgba(rippleItem.rippleColor.r, rippleItem.rippleColor.g, rippleItem.rippleColor.b, 0.95 * (1.0 - rippleItem.animProgress))
-                        border.width: Math.max(1.5, 4.0 * (1.0 - rippleItem.animProgress * 0.6))
-                    }
+                    ctx.restore();
+                }
+            }
 
-                    // Inner secondary wave
-                    Rectangle {
-                        readonly property real innerProg: Math.max(0.0, (rippleItem.animProgress - 0.15) / 0.85)
-                        readonly property real curRadius: 4 + (root.rippleSize * 0.65) * innerProg
-                        visible: rippleItem.animProgress > 0.15
-                        x: -curRadius
-                        y: -curRadius
-                        width: curRadius * 2
-                        height: curRadius * 2
-                        radius: curRadius
-                        color: "transparent"
-                        border.color: Qt.rgba(1, 1, 1, 0.7 * (1.0 - innerProg))
-                        border.width: 2
+            Timer {
+                id: rippleAnimTimer
+                interval: 16
+                repeat: true
+                running: win.activeRipples.length > 0
+                onTriggered: {
+                    const now = Date.now();
+                    const dur = root.rippleDuration;
+                    const remaining = win.activeRipples.filter(r => (now - r.startTime) < dur);
+                    if (remaining.length !== win.activeRipples.length) {
+                        win.activeRipples = remaining;
                     }
+                    rippleCanvas.requestPaint();
                 }
             }
 
@@ -509,7 +610,6 @@ PluginComponent {
                         ctx.lineWidth = s.size;
 
                         if (s.laser) {
-                            // Laser outer glow
                             ctx.shadowColor = s.color;
                             ctx.shadowBlur = s.size * 2.2;
                         }
@@ -527,7 +627,6 @@ PluginComponent {
                             ctx.lineTo(p1.x, p1.y);
                             ctx.stroke();
 
-                            // Draw arrowhead
                             const angle = Math.atan2(p1.y - p0.y, p1.x - p0.x);
                             const headLen = Math.max(14, s.size * 3.2);
                             ctx.beginPath();
@@ -559,7 +658,6 @@ PluginComponent {
                 }
             }
 
-            // Timer to animate laser stroke fade-out
             Timer {
                 interval: 33
                 repeat: true
@@ -574,7 +672,6 @@ PluginComponent {
                 }
             }
 
-            // Mouse and Keyboard interaction when Draw Mode is active
             MouseArea {
                 id: drawMouseArea
                 anchors.fill: parent
@@ -607,13 +704,13 @@ PluginComponent {
                     }
                     if (mouse.button === Qt.LeftButton) {
                         if (root.clicksActive) {
-                            root.spawnRipple("LEFT");
+                            root.spawnClickEffect("LEFT");
                         }
                         let shapeMode = "free";
                         if (mouse.modifiers & Qt.ShiftModifier) {
-                            shapeMode = "line"; // Shift + drag = Arrow!
+                            shapeMode = "line";
                         } else if (mouse.modifiers & Qt.ControlModifier) {
-                            shapeMode = "rect"; // Ctrl + drag = Rectangle!
+                            shapeMode = "rect";
                         }
                         win.currentStroke = {
                             "points": [{ "x": mouse.x, "y": mouse.y }],
@@ -644,7 +741,6 @@ PluginComponent {
                 }
             }
 
-            // Brush size preview circle at cursor when in Draw Mode
             Rectangle {
                 visible: root.drawActive && win.cursorOnScreen
                 x: win.localX - width / 2
@@ -657,7 +753,6 @@ PluginComponent {
                 border.width: 2
             }
 
-            // Keyboard shortcuts while in Draw Mode
             Item {
                 focus: root.drawActive
                 Keys.onPressed: event => {
@@ -705,7 +800,6 @@ PluginComponent {
                     anchors.centerIn: parent
                     spacing: 10
 
-                    // Color swatches (1..6)
                     Repeater {
                         model: root.paletteColors
 
@@ -736,7 +830,6 @@ PluginComponent {
                         anchors.verticalCenter: parent.verticalCenter
                     }
 
-                    // Laser Mode Toggle (L)
                     Rectangle {
                         height: 30
                         width: laserLabel.implicitWidth + 18
@@ -762,7 +855,6 @@ PluginComponent {
                         }
                     }
 
-                    // Blur Spotlight Toggle (B)
                     Rectangle {
                         height: 30
                         width: blurLabel.implicitWidth + 18
@@ -788,7 +880,6 @@ PluginComponent {
                         }
                     }
 
-                    // Clear Button (C)
                     Rectangle {
                         height: 30
                         width: clearLabel.implicitWidth + 18
@@ -811,7 +902,6 @@ PluginComponent {
                         }
                     }
 
-                    // Exit Button (Esc)
                     Rectangle {
                         height: 30
                         width: exitLabel.implicitWidth + 18

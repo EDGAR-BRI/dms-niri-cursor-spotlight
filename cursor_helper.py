@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
 """
 Helper for cursorSpotlight DMS plugin on Niri / Wayland.
-1. Monitors mouse devices via python-evdev (if accessible) for global click events
-   (BTN_LEFT, BTN_RIGHT, BTN_MIDDLE) and relative motion.
-2. Checks whether mouse evdev devices are readable so the UI can offer a 1-click
-   Polkit (pkexec) permission grant if needed.
+Monitors mouse/touchpad devices via python-evdev for global click events
+(BTN_LEFT, BTN_RIGHT, BTN_MIDDLE) and relative motion while dragging.
 """
 
 import os
@@ -28,6 +26,7 @@ BTN_MAP = {
 
 def has_all_mouse_permissions() -> bool:
     """Check if all mouse handlers in /proc/bus/input/devices are readable."""
+    found_any = False
     try:
         with open("/proc/bus/input/devices", "r", encoding="utf-8", errors="ignore") as f:
             content = f.read()
@@ -36,15 +35,17 @@ def has_all_mouse_permissions() -> bool:
                 for token in block.split():
                     if token.startswith("event"):
                         dev_path = f"/dev/input/{token}"
-                        if os.path.exists(dev_path) and not os.access(dev_path, os.R_OK):
-                            return False
+                        if os.path.exists(dev_path):
+                            found_any = True
+                            if not os.access(dev_path, os.R_OK):
+                                return False
     except Exception:
-        pass
-    return True
+        return False
+    return found_any
 
 
 def find_pointer_devices(existing_paths: set):
-    """Find readable evdev devices that have BTN_LEFT or REL_X."""
+    """Find readable evdev devices that have BTN_LEFT and pointer axes."""
     found = []
     for path in evdev.list_devices():
         if path in existing_paths:
@@ -70,12 +71,14 @@ def main():
     last_scan = 0.0
     last_perm_status = None
     last_move_emit = 0.0
+    last_btn_ts = {}  # (btn, val) -> monotonic timestamp (dedup input-remapper + raw)
     acc_dx = 0
     acc_dy = 0
 
     while True:
         now = time.monotonic()
-        if now - last_scan >= 3.0:
+        scan_interval = 1.0 if last_perm_status != "STATUS OK" else 3.0
+        if now - last_scan >= scan_interval:
             last_scan = now
             new_devs = find_pointer_devices(known_paths)
             for d in new_devs:
@@ -89,13 +92,12 @@ def main():
                 last_perm_status = status_str
 
         if not devices:
-            time.sleep(1.0)
+            time.sleep(0.5)
             continue
 
         try:
-            r, _, _ = select.select(list(devices.keys()), [], [], 0.5)
+            r, _, _ = select.select(list(devices.keys()), [], [], 0.3)
         except Exception:
-            # Clean up closed/disconnected devices
             for fd, d in list(devices.items()):
                 try:
                     os.fstat(fd)
@@ -112,10 +114,16 @@ def main():
                 for event in dev.read():
                     if event.type == ecodes.EV_KEY and event.code in BTN_MAP:
                         btn = BTN_MAP[event.code]
-                        if event.value == 1:
-                            print(f"DOWN {btn}", flush=True)
-                        elif event.value == 0:
-                            print(f"UP {btn}", flush=True)
+                        val = event.value
+                        if val in (0, 1):
+                            t = time.monotonic()
+                            key = (btn, val)
+                            if t - last_btn_ts.get(key, 0.0) > 0.018:
+                                last_btn_ts[key] = t
+                                if val == 1:
+                                    print(f"DOWN {btn}", flush=True)
+                                else:
+                                    print(f"UP {btn}", flush=True)
                     elif event.type == ecodes.EV_REL:
                         if event.code == ecodes.REL_X:
                             acc_dx += event.value
@@ -123,7 +131,7 @@ def main():
                             acc_dy += event.value
                     elif event.type == ecodes.EV_SYN and (acc_dx != 0 or acc_dy != 0):
                         t = time.monotonic()
-                        if t - last_move_emit >= 0.014:
+                        if t - last_move_emit >= 0.012:
                             print(f"MOVE {acc_dx} {acc_dy}", flush=True)
                             acc_dx = 0
                             acc_dy = 0
