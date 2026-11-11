@@ -27,21 +27,34 @@ PluginComponent {
     // Click pulse animation state for the cursor halo itself
     property real haloScale: 1.0
     property real clickFlash: 0.0
-    property color activeClickColor: Theme.primary
+    property color activeClickColor: leftColorResolved
 
     readonly property bool anyActive: spotlightActive || clicksActive || drawActive
     readonly property string pluginDir: Qt.resolvedUrl(".").toString().replace(/^file:\/\//, "").replace(/\/$/, "")
 
-    // Configurable settings via pluginData
+    // Spotlight settings
     readonly property real spotlightRadius: Number(pluginData.spotlightRadius) || 140
-    readonly property real spotlightDimOpacity: pluginData.spotlightDimOpacity !== undefined ? Number(pluginData.spotlightDimOpacity) : 0.58
-    readonly property int spotlightAutoHideMs: pluginData.spotlightAutoHideMs !== undefined ? Number(pluginData.spotlightAutoHideMs) : 0
-    readonly property real spotlightRingWidth: Number(pluginData.spotlightRingWidth) || 3
+    readonly property real spotlightDimPercent: pluginData.spotlightDimPercent !== undefined ? Number(pluginData.spotlightDimPercent) : 58
+    readonly property real spotlightDimOpacity: Math.max(0.0, Math.min(0.95, spotlightDimPercent / 100.0))
+    readonly property int spotlightAutoHideSec: pluginData.spotlightAutoHideSec !== undefined ? Number(pluginData.spotlightAutoHideSec) : 0
+    readonly property int spotlightAutoHideMs: spotlightAutoHideSec * 1000
+    readonly property real spotlightRingWidth: pluginData.spotlightRingWidth !== undefined ? Number(pluginData.spotlightRingWidth) : 3
+    readonly property color spotlightColorResolved: pluginData.spotlightCustomColor ? Qt.color(pluginData.spotlightCustomColor) : Theme.primary
 
-    readonly property real rippleSize: Number(pluginData.rippleSize) || 58
-    readonly property int rippleDuration: Number(pluginData.rippleDuration) || 460
+    // Click & Halo settings
     readonly property bool showHaloWithClicks: pluginData.showHaloWithClicks !== undefined ? Boolean(pluginData.showHaloWithClicks) : true
     readonly property real haloRadius: Number(pluginData.haloRadius) || 20
+    readonly property real haloGrowPercent: pluginData.haloGrowPercent !== undefined ? Number(pluginData.haloGrowPercent) : 175
+    readonly property real haloTargetScale: Math.max(1.0, haloGrowPercent / 100.0)
+    readonly property bool showShockwave: pluginData.showShockwave !== undefined ? Boolean(pluginData.showShockwave) : true
+    readonly property bool showRadialBurst: pluginData.showRadialBurst !== undefined ? Boolean(pluginData.showRadialBurst) : true
+    readonly property real rippleSize: Number(pluginData.rippleSize) || 58
+    readonly property int rippleDuration: Number(pluginData.rippleDuration) || 460
+
+    // Custom colors per mouse button
+    readonly property color leftColorResolved: pluginData.leftClickColor ? Qt.color(pluginData.leftClickColor) : Theme.primary
+    readonly property color rightColorResolved: pluginData.rightClickColor ? Qt.color(pluginData.rightClickColor) : Qt.color("#ffa502")
+    readonly property color middleColorResolved: pluginData.middleClickColor ? Qt.color(pluginData.middleClickColor) : Qt.color("#00d2d3")
 
     // Drawing brush settings
     property string drawColor: pluginData.drawColor || "#ff4757"
@@ -133,11 +146,11 @@ PluginComponent {
             return;
         const b = btn || "LEFT";
         if (b === "RIGHT") {
-            activeClickColor = "#ffa502";
+            activeClickColor = rightColorResolved;
         } else if (b === "MIDDLE") {
-            activeClickColor = "#00d2d3";
+            activeClickColor = middleColorResolved;
         } else {
-            activeClickColor = Theme.primary;
+            activeClickColor = leftColorResolved;
         }
         haloPulseAnim.restart();
         root.clickTriggered(root.cursorX, root.cursorY, b);
@@ -151,8 +164,8 @@ PluginComponent {
             NumberAnimation {
                 target: root
                 property: "haloScale"
-                from: 0.75
-                to: 1.75
+                from: 0.78
+                to: root.haloTargetScale
                 duration: 150
                 easing.type: Easing.OutBack
                 easing.overshoot: 2.2
@@ -160,7 +173,7 @@ PluginComponent {
             NumberAnimation {
                 target: root
                 property: "haloScale"
-                from: 1.75
+                from: root.haloTargetScale
                 to: 1.0
                 duration: 260
                 easing.type: Easing.OutCubic
@@ -387,7 +400,6 @@ PluginComponent {
                 }
             }
 
-            // Track pointer coordinates whenever Wayland delivers pointer enter/motion
             HoverHandler {
                 id: trackerHover
                 onPointChanged: {
@@ -409,7 +421,7 @@ PluginComponent {
                 property bool onScreen: win.cursorOnScreen
                 property real sRadius: root.spotlightRadius * (1.0 + root.clickFlash * 0.12)
                 property real dimAlpha: root.spotlightDimOpacity
-                property color ringColor: root.clickFlash > 0.05 ? root.activeClickColor : Theme.primary
+                property color ringColor: root.clickFlash > 0.05 ? root.activeClickColor : root.spotlightColorResolved
 
                 onCxChanged: if (visible) requestPaint()
                 onCyChanged: if (visible) requestPaint()
@@ -424,7 +436,6 @@ PluginComponent {
                     ctx.save();
                     ctx.clearRect(0, 0, width, height);
 
-                    // Draw dark overlay with circular spotlight hole using evenodd winding
                     ctx.beginPath();
                     ctx.rect(0, 0, width, height);
                     if (onScreen) {
@@ -433,8 +444,7 @@ PluginComponent {
                     ctx.fillStyle = Qt.rgba(0, 0, 0, dimAlpha);
                     ctx.fill("evenodd");
 
-                    // Draw glowing accent ring around the spotlight hole
-                    if (onScreen) {
+                    if (onScreen && root.spotlightRingWidth > 0) {
                         ctx.beginPath();
                         ctx.arc(cx, cy, sRadius + 3, 0, Math.PI * 2);
                         ctx.strokeStyle = Qt.rgba(ringColor.r, ringColor.g, ringColor.b, 0.35 + root.clickFlash * 0.4);
@@ -457,7 +467,7 @@ PluginComponent {
                 id: cursorHalo
                 visible: root.clicksActive && root.showHaloWithClicks && win.cursorOnScreen && !root.drawActive
                 readonly property real currentRadius: root.haloRadius * root.haloScale
-                readonly property color baseColor: root.clickFlash > 0.05 ? root.activeClickColor : Theme.primary
+                readonly property color baseColor: root.clickFlash > 0.05 ? root.activeClickColor : root.leftColorResolved
 
                 x: win.localX - currentRadius
                 y: win.localY - currentRadius
@@ -468,7 +478,6 @@ PluginComponent {
                 border.color: Qt.rgba(baseColor.r, baseColor.g, baseColor.b, 0.8 + root.clickFlash * 0.2)
                 border.width: 2.2 + root.clickFlash * 2.5
 
-                // Inner center dot that pops on click
                 Rectangle {
                     anchors.centerIn: parent
                     width: 6 + root.clickFlash * 8
@@ -483,7 +492,7 @@ PluginComponent {
             Canvas {
                 id: rippleCanvas
                 anchors.fill: parent
-                visible: win.activeRipples.length > 0
+                visible: win.activeRipples.length > 0 && (root.showShockwave || root.showRadialBurst)
 
                 onPaint: {
                     const ctx = getContext("2d");
@@ -500,41 +509,39 @@ PluginComponent {
                         if (p >= 1.0)
                             continue;
 
-                        // Cubic ease-out for smooth expansion
                         const ease = 1.0 - Math.pow(1.0 - p, 3);
                         const alpha = 1.0 - p;
 
-                        let c = Theme.primary;
+                        let c = root.leftColorResolved;
                         if (r.btn === "RIGHT") {
-                            c = Qt.rgba(1.0, 0.647, 0.008, 1.0); // #ffa502
+                            c = root.rightColorResolved;
                         } else if (r.btn === "MIDDLE") {
-                            c = Qt.rgba(0.0, 0.824, 0.827, 1.0); // #00d2d3
+                            c = root.middleColorResolved;
                         }
 
-                        // 1) Expanding outer shockwave ring
-                        const outerR = 10 + (maxR - 10) * ease;
-                        ctx.beginPath();
-                        ctx.arc(r.x, r.y, outerR, 0, Math.PI * 2);
-                        ctx.fillStyle = Qt.rgba(c.r, c.g, c.b, 0.24 * (1.0 - ease));
-                        ctx.fill();
-                        ctx.lineWidth = Math.max(1.5, 4.5 * alpha);
-                        ctx.strokeStyle = Qt.rgba(c.r, c.g, c.b, 0.95 * alpha);
-                        ctx.stroke();
-
-                        // 2) Secondary inner wave
-                        if (p > 0.1) {
-                            const p2 = (p - 0.1) / 0.9;
-                            const ease2 = 1.0 - Math.pow(1.0 - p2, 2);
-                            const innerR = 6 + (maxR * 0.68) * ease2;
+                        if (root.showShockwave) {
+                            const outerR = 10 + (maxR - 10) * ease;
                             ctx.beginPath();
-                            ctx.arc(r.x, r.y, innerR, 0, Math.PI * 2);
-                            ctx.lineWidth = Math.max(1.0, 2.5 * (1.0 - p2));
-                            ctx.strokeStyle = Qt.rgba(1, 1, 1, 0.75 * (1.0 - p2));
+                            ctx.arc(r.x, r.y, outerR, 0, Math.PI * 2);
+                            ctx.fillStyle = Qt.rgba(c.r, c.g, c.b, 0.24 * (1.0 - ease));
+                            ctx.fill();
+                            ctx.lineWidth = Math.max(1.5, 4.5 * alpha);
+                            ctx.strokeStyle = Qt.rgba(c.r, c.g, c.b, 0.95 * alpha);
                             ctx.stroke();
+
+                            if (p > 0.1) {
+                                const p2 = (p - 0.1) / 0.9;
+                                const ease2 = 1.0 - Math.pow(1.0 - p2, 2);
+                                const innerR = 6 + (maxR * 0.68) * ease2;
+                                ctx.beginPath();
+                                ctx.arc(r.x, r.y, innerR, 0, Math.PI * 2);
+                                ctx.lineWidth = Math.max(1.0, 2.5 * (1.0 - p2));
+                                ctx.strokeStyle = Qt.rgba(1, 1, 1, 0.75 * (1.0 - p2));
+                                ctx.stroke();
+                            }
                         }
 
-                        // 3) 8 Radial burst rays shooting outward
-                        if (p < 0.75) {
+                        if (root.showRadialBurst && p < 0.75) {
                             const rayP = p / 0.75;
                             const rayAlpha = 1.0 - rayP;
                             const rStart = 14 + (maxR * 0.55) * ease;
