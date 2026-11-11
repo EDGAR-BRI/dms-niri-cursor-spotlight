@@ -15,6 +15,37 @@ PluginSettings {
     readonly property bool drawOn: daemonInstance ? daemonInstance.drawActive : false
     readonly property string permStatus: daemonInstance ? daemonInstance.helperPermStatus : "UNKNOWN"
 
+    // DMS's built-in reloadChildValues() only visits top-level children of PluginSettings.
+    // Recursively initialize all ToggleSetting / SliderSetting nested inside StyledRect cards.
+    function reloadNested(parentItem) {
+        if (!parentItem || !parentItem.children)
+            return;
+        for (let i = 0; i < parentItem.children.length; i++) {
+            const ch = parentItem.children[i];
+            if (!ch)
+                continue;
+            if (typeof ch.loadValue === "function" && ch.settingKey !== undefined) {
+                ch.loadValue();
+                if (root.pluginService && ch.isInitialized !== undefined && !ch.isInitialized) {
+                    ch.value = root.loadValue(ch.settingKey, ch.defaultValue);
+                    ch.isInitialized = true;
+                }
+            } else {
+                reloadNested(ch);
+            }
+        }
+    }
+
+    onPluginServiceChanged: {
+        if (pluginService) {
+            Qt.callLater(() => root.reloadNested(root));
+        }
+    }
+
+    Component.onCompleted: {
+        Qt.callLater(() => root.reloadNested(root));
+    }
+
     function settingVal(key, fallback) {
         if (!pluginService || !pluginService.loadPluginData)
             return fallback;
@@ -22,8 +53,22 @@ PluginSettings {
     }
 
     function saveVal(key, val) {
-        if (pluginService && pluginService.savePluginData)
+        if (pluginService && pluginService.savePluginData) {
             pluginService.savePluginData(pluginId, key, val);
+            settingChanged();
+        }
+    }
+
+    // Section card that forwards DMS's top-level loadValue() call to nested settings
+    component SettingsCard: StyledRect {
+        id: cardRect
+        width: parent.width
+        radius: Theme.cornerRadius
+        color: Theme.surfaceContainerHigh
+
+        function loadValue() {
+            root.reloadNested(cardRect);
+        }
     }
 
     // Reusable code snippet component with 1-click Copy button
@@ -95,8 +140,14 @@ PluginSettings {
         property color defaultColor: Theme.primary
         property bool allowThemeReset: false
 
-        readonly property string storedHex: root.pluginService ? root.settingVal(settingKey, "") : ""
+        property string storedHex: ""
         readonly property color currentColor: storedHex !== "" ? Qt.color(storedHex) : defaultColor
+
+        function loadValue() {
+            if (root.pluginService) {
+                storedHex = root.settingVal(settingKey, "");
+            }
+        }
 
         width: parent.width
         height: 44
@@ -133,12 +184,10 @@ PluginSettings {
                 iconName: "restart_alt"
                 iconSize: Theme.iconSize - 4
                 buttonSize: 28
-                tooltipText: "Restaurar al color del tema"
+                tooltipText: "Restaurar al color por defecto"
                 onClicked: {
-                    if (root.pluginService && root.pluginService.deletePluginKey)
-                        root.pluginService.deletePluginKey(root.pluginId, colorRow.settingKey);
-                    else
-                        root.saveVal(colorRow.settingKey, "");
+                    colorRow.storedHex = "";
+                    root.saveVal(colorRow.settingKey, "");
                 }
             }
 
@@ -160,7 +209,9 @@ PluginSettings {
                         PopoutService.colorPickerModal.selectedColor = colorRow.currentColor;
                         PopoutService.colorPickerModal.pickerTitle = colorRow.labelText;
                         PopoutService.colorPickerModal.onColorSelectedCallback = selected => {
-                            root.saveVal(colorRow.settingKey, selected.toString());
+                            const hexStr = selected.toString();
+                            colorRow.storedHex = hexStr;
+                            root.saveVal(colorRow.settingKey, hexStr);
                         };
                         PopoutService.colorPickerModal.show();
                     }
@@ -186,11 +237,8 @@ PluginSettings {
     }
 
     // 1. ESTADO Y CONTROLES EN VIVO
-    StyledRect {
-        width: parent.width
+    SettingsCard {
         height: liveCol.implicitHeight + Theme.spacingL * 2
-        radius: Theme.cornerRadius
-        color: Theme.surfaceContainerHigh
 
         Column {
             id: liveCol
@@ -205,7 +253,6 @@ PluginSettings {
                 color: Theme.surfaceText
             }
 
-            // Spotlight live toggle
             Row {
                 width: parent.width
                 spacing: Theme.spacingM
@@ -238,7 +285,6 @@ PluginSettings {
                 }
             }
 
-            // Clicks live toggle
             Row {
                 width: parent.width
                 spacing: Theme.spacingM
@@ -271,7 +317,6 @@ PluginSettings {
                 }
             }
 
-            // Draw mode live toggle
             Row {
                 width: parent.width
                 spacing: Theme.spacingM
@@ -304,7 +349,6 @@ PluginSettings {
                 }
             }
 
-            // Permission button
             StyledRect {
                 width: parent.width
                 height: 44
@@ -348,11 +392,8 @@ PluginSettings {
     }
 
     // 2. PERSONALIZACIÓN DE CLICKS Y HALO
-    StyledRect {
-        width: parent.width
+    SettingsCard {
         height: clicksCol.implicitHeight + Theme.spacingL * 2
-        radius: Theme.cornerRadius
-        color: Theme.surfaceContainerHigh
 
         Column {
             id: clicksCol
@@ -455,11 +496,8 @@ PluginSettings {
     }
 
     // 3. PERSONALIZACIÓN DEL SPOTLIGHT (BLUR)
-    StyledRect {
-        width: parent.width
+    SettingsCard {
         height: spotCol.implicitHeight + Theme.spacingL * 2
-        radius: Theme.cornerRadius
-        color: Theme.surfaceContainerHigh
 
         Column {
             id: spotCol
@@ -525,11 +563,8 @@ PluginSettings {
     }
 
     // 4. PERSONALIZACIÓN DEL MODO PINCEL (DRAW)
-    StyledRect {
-        width: parent.width
+    SettingsCard {
         height: drawCol.implicitHeight + Theme.spacingL * 2
-        radius: Theme.cornerRadius
-        color: Theme.surfaceContainerHigh
 
         Column {
             id: drawCol
@@ -572,11 +607,8 @@ PluginSettings {
     }
 
     // 5. ATAJOS PARA CUALQUIER GESTOR DE VENTANAS (WAYLAND)
-    StyledRect {
-        width: parent.width
+    SettingsCard {
         height: bindsCol.implicitHeight + Theme.spacingL * 2
-        radius: Theme.cornerRadius
-        color: Theme.surfaceContainerHigh
 
         Column {
             id: bindsCol

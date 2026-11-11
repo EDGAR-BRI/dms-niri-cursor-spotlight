@@ -11,9 +11,17 @@ PluginComponent {
 
     pluginId: "cursorSpotlight"
 
+    function boolVal(val, fallback) {
+        if (val === undefined || val === null)
+            return fallback;
+        if (val === false || val === "false" || val === 0 || val === "0")
+            return false;
+        return Boolean(val);
+    }
+
     // Core feature states
     property bool spotlightActive: false
-    property bool clicksActive: pluginData.clicksActive !== undefined ? Boolean(pluginData.clicksActive) : false
+    property bool clicksActive: boolVal(pluginData.clicksActive, false)
     property bool drawActive: false
 
     // Cursor tracking state (global logical coordinates across all outputs)
@@ -42,12 +50,12 @@ PluginComponent {
     readonly property color spotlightColorResolved: pluginData.spotlightCustomColor ? Qt.color(pluginData.spotlightCustomColor) : Theme.primary
 
     // Click & Halo settings
-    readonly property bool showHaloWithClicks: pluginData.showHaloWithClicks !== undefined ? Boolean(pluginData.showHaloWithClicks) : true
+    readonly property bool showHaloWithClicks: boolVal(pluginData.showHaloWithClicks, true)
     readonly property real haloRadius: Number(pluginData.haloRadius) || 20
     readonly property real haloGrowPercent: pluginData.haloGrowPercent !== undefined ? Number(pluginData.haloGrowPercent) : 175
     readonly property real haloTargetScale: Math.max(1.0, haloGrowPercent / 100.0)
-    readonly property bool showShockwave: pluginData.showShockwave !== undefined ? Boolean(pluginData.showShockwave) : true
-    readonly property bool showRadialBurst: pluginData.showRadialBurst !== undefined ? Boolean(pluginData.showRadialBurst) : true
+    readonly property bool showShockwave: boolVal(pluginData.showShockwave, true)
+    readonly property bool showRadialBurst: boolVal(pluginData.showRadialBurst, true)
     readonly property real rippleSize: Number(pluginData.rippleSize) || 58
     readonly property int rippleDuration: Number(pluginData.rippleDuration) || 460
 
@@ -59,7 +67,7 @@ PluginComponent {
     // Drawing brush settings
     property string drawColor: pluginData.drawColor || "#ff4757"
     property real drawSize: Number(pluginData.drawSize) || 5
-    property bool drawLaserMode: pluginData.drawLaserMode !== undefined ? Boolean(pluginData.drawLaserMode) : false
+    property bool drawLaserMode: boolVal(pluginData.drawLaserMode, false)
 
     readonly property var paletteColors: [
         "#ff4757", // 1: Red
@@ -384,6 +392,8 @@ PluginComponent {
                     }
                 }
                 function onClickTriggered(gx, gy, btn) {
+                    if (!root.showShockwave && !root.showRadialBurst)
+                        return;
                     const lx = gx - win.modelData.x;
                     const ly = gy - win.modelData.y;
                     if (lx >= -100 && ly >= -100 && lx <= win.width + 100 && ly <= win.height + 100) {
