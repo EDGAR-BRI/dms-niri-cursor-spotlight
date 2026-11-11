@@ -14,13 +14,27 @@ if [ "${PLUGIN_DIR}" != "$(realpath "${TARGET_DIR}" 2>/dev/null || echo "${TARGE
     echo "    Enlazado en: ${TARGET_DIR}"
 fi
 
-# 2. Compilar wl-nudge si gcc está disponible
+# 2. Compilar wl-nudge si gcc y cabeceras están disponibles
 if command -v gcc >/dev/null 2>&1; then
     echo "==> Compilando helper Wayland (wl-nudge)..."
-    gcc -O2 "${PLUGIN_DIR}/wl_nudge.c" -o "${PLUGIN_DIR}/wl-nudge" -lwayland-client
-    chmod +x "${PLUGIN_DIR}/wl-nudge"
+    gcc -O2 "${PLUGIN_DIR}/wl_nudge.c" -o "${PLUGIN_DIR}/wl-nudge" -lwayland-client 2>/dev/null || {
+        echo "    [Nota] No se pudo compilar wl-nudge (falta libwayland-client o similar). El plugin funcionará normalmente con cursor_helper.py."
+    }
+    chmod +x "${PLUGIN_DIR}/wl-nudge" 2>/dev/null || true
 fi
 chmod +x "${PLUGIN_DIR}/cursor_helper.py"
+
+# Asegurar dependencias de python (evdev) en Arch / CachyOS si pacman está presente
+if ! python3 -c "import evdev" >/dev/null 2>&1; then
+    echo "==> Instalando python-evdev necesario para capturar clicks..."
+    if command -v pacman >/dev/null 2>&1; then
+        sudo pacman -S --needed --noconfirm python-evdev || echo "    [Aviso] Instala python-evdev manualmente: sudo pacman -S python-evdev"
+    elif command -v apt-get >/dev/null 2>&1; then
+        sudo apt-get update && sudo apt-get install -y python3-evdev || echo "    [Aviso] Instala python3-evdev con apt"
+    elif command -v dnf >/dev/null 2>&1; then
+        sudo dnf install -y python3-evdev || echo "    [Aviso] Instala python3-evdev con dnf"
+    fi
+fi
 
 # 3. Configurar permisos de lectura de clicks (uaccess udev rule + setfacl inmediato)
 echo "==> Configurando permisos de lectura de eventos de ratón (sin necesidad de reiniciar sesión)..."
